@@ -1,74 +1,78 @@
 # eegdb_client_py
 
-Python clients for [EEGDB](https://github.com/eegdb/eegdb): an HTTP API demo script and a desktop/CLI uploader for EDF, BDF, and FIF files.
+Python clients for [EEGDB](https://github.com/eegdb/eegdb): a desktop GUI/CLI client and an HTTP API demo script.
 
-## Components
+## Project layout
+
+```
+eegdb_client_py/
+├── app.py                 # GUI entry (Run / PyInstaller)
+├── requirements.txt       # all Python dependencies
+├── eegdb_client/          # library package (UI, CLI, transport, readers)
+├── examples/
+│   └── http_api_demo.py   # standalone HTTP REST API demo
+└── scripts/               # build scripts and utilities
+```
 
 | Path | Description |
 |------|-------------|
-| `eegdb_client.py` | HTTP API demo: import EDF, query channels, rebuild EDF from server data |
-| `eegdb_uploader/` | PyQt6 GUI + CLI: TCP upload/download, HTTP health check |
+| `app.py` | Launch PyQt6 desktop GUI |
+| `eegdb_client/` | Package: GUI, CLI, TCP upload/download, HTTP health check |
+| `examples/http_api_demo.py` | HTTP API demo: import EDF, query channels, rebuild EDF |
 
 ## Requirements
 
 - Python 3.10+
 - A running EEGDB server ([eegdb](https://github.com/eegdb/eegdb))
 
-### HTTP demo client
-
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Desktop uploader
+## Desktop GUI
 
 ```bash
-pip install -r eegdb_uploader/requirements.txt
-```
-
-## HTTP API demo (`eegdb_client.py`)
-
-```bash
-# Upload an EDF and download it back
-python3 eegdb_client.py \
-  --server http://localhost:8080 \
-  --edf recording.edf \
-  --study-id demo-study \
-  --output rebuilt.edf
-```
-
-## Uploader GUI
-
-```bash
-export PYTHONPATH="$(pwd)"
-python3 -m eegdb_uploader
+python app.py
+# or
+python -m eegdb_client
 ```
 
 Connect to your EEGDB host (default HTTP `:8080`, TCP `:9090`), pick a file, set study attributes, then upload or download.
 
-## Uploader CLI
+## CLI
 
 ```bash
-export PYTHONPATH="$(pwd)"
-
-python3 -m eegdb_uploader health
-python3 -m eegdb_uploader upload recording.edf --lab mylab --paradigm resting
-python3 -m eegdb_uploader list
-python3 -m eegdb_uploader download <study_id> -o out.edf
+python -m eegdb_client health
+python -m eegdb_client upload recording.edf --lab mylab --paradigm resting
+python -m eegdb_client list
+python -m eegdb_client download <study_id> -o out.edf
 ```
 
 Options: `--host`, `--tcp-port`, `--http-port`, `-v`.
 
-## Build standalone app (Linux)
+## HTTP API demo
 
 ```bash
-cd eegdb_uploader
-chmod +x scripts/build_linux.sh
-./scripts/build_linux.sh
-# Output: eegdb_uploader/dist/EEGDBUploader/
+python examples/http_api_demo.py \
+  --server http://localhost:8080 \
+  --edf recording.edf \
+  --study-name demo-study \
+  --output rebuilt.edf
 ```
 
-Windows builds use `scripts/build_windows.ps1` and Inno Setup (`scripts/eegdb_uploader.iss`).
+## Build standalone app
+
+**Linux / macOS:**
+
+```bash
+chmod +x scripts/build_linux.sh
+./scripts/build_linux.sh
+# Output: dist/EEGDBClient/
+```
+
+**Windows:** run `scripts/build_windows.ps1`; optional Inno Setup installer via `scripts/eegdb_client.iss`.
 
 ## Related
 

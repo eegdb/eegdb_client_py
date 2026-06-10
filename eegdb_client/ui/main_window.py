@@ -62,7 +62,7 @@ class Worker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("EEGDB Uploader")
+        self.setWindowTitle("EEGDB Client")
         self.resize(960, 780)
         self._worker: Optional[Worker] = None
 

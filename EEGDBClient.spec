@@ -3,11 +3,16 @@ import os
 
 from PyInstaller.utils.hooks import collect_all
 
-PROJECT_ROOT = os.path.abspath(os.path.join(SPECPATH, '..'))
+PROJECT_ROOT = os.path.abspath(SPECPATH)
 
 datas = []
 binaries = []
-hiddenimports = ['eegdb_uploader', 'eegdb_uploader.cli', 'eegdb_uploader.ui.main_window', 'eegdb_uploader.ui.attrs_form']
+hiddenimports = [
+    'eegdb_client',
+    'eegdb_client.cli',
+    'eegdb_client.ui.main_window',
+    'eegdb_client.ui.attrs_form',
+]
 tmp_ret = collect_all('mne')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PyQt6')
@@ -36,7 +41,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='EEGDBUploader',
+    name='EEGDBClient',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -55,5 +60,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='EEGDBUploader',
+    name='EEGDBClient',
 )

@@ -47,7 +47,7 @@ class TCPError(RuntimeError):
 
 
 class EEGDBTCPClient:
-    def __init__(self, host: str, port: int, client_name: str = "eegdb-uploader"):
+    def __init__(self, host: str, port: int, client_name: str = "eegdb-client"):
         self.host = host
         self.port = port
         self.client_name = client_name

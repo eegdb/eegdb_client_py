@@ -78,7 +78,7 @@ def cmd_health(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="eegdb-uploader")
+    parser = argparse.ArgumentParser(prog="eegdb-client")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--tcp-port", type=int, default=9090)
     parser.add_argument("--http-port", type=int, default=8080)

@@ -1,10 +1,10 @@
-; Inno Setup script for EEGDB Uploader (Windows)
+; Inno Setup script for EEGDB Client (Windows)
 ; Build PyInstaller output first: scripts/build_windows.ps1
 
-#define MyAppName "EEGDB Uploader"
+#define MyAppName "EEGDB Client"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "EEGDB"
-#define MyAppExeName "EEGDBUploader.exe"
+#define MyAppExeName "EEGDBClient.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -14,7 +14,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=..\dist\installer
-OutputBaseFilename=EEGDBUploader-setup-0.1.0
+OutputBaseFilename=EEGDBClient-setup-0.1.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -27,7 +27,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\dist\EEGDBUploader\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\EEGDBClient\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
