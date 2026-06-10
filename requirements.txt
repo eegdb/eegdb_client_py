@@ -1,0 +1,4 @@
+# Dependencies for eegdb_client.py (HTTP API demo)
+numpy>=1.24
+pyedflib>=0.1.38
+requests>=2.31

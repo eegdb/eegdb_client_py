@@ -1,0 +1,27 @@
+# Virtual environments
+venv/
+.venv/
+
+# Build artifacts
+build/
+dist/
+*.spec.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+
+# Local test data
+*.edf
+*.bdf
+*.fif
+
+# Environment
+.env
+.env.local
