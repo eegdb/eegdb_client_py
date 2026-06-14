@@ -17,7 +17,7 @@ eegdb_client_py/
 | Path | Description |
 |------|-------------|
 | `app.py` | Launch PyQt6 desktop GUI |
-| `eegdb_client/` | Package: GUI, CLI, TCP upload/download, HTTP health check |
+| `eegdb_client/` | Package: GUI, CLI, TCP upload/download |
 | `examples/http_api_demo.py` | HTTP API demo: import EDF, query channels, rebuild EDF |
 
 ## Requirements
@@ -39,7 +39,7 @@ python app.py
 python -m eegdb_client
 ```
 
-Connect to your EEGDB host (default HTTP `:8080`, TCP `:9090`), pick a file, set study attributes, then upload or download.
+Connect to your EEGDB host (default TCP port `8081`), pick a file, set study attributes, then upload or download.
 
 ## CLI
 
@@ -50,7 +50,7 @@ python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 ```
 
-Options: `--host`, `--tcp-port`, `--http-port`, `-v`.
+Options: `--host`, `--port`, `-v`.
 
 ## HTTP API demo
 

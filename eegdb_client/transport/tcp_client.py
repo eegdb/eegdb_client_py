@@ -37,6 +37,7 @@ MSG_READ_EVENTS_RESP = 0x49
 MSG_CLOSE = 0xFF
 
 MAX_READ_BATCH = 65536
+CONNECT_TIMEOUT = 3
 
 
 class TCPError(RuntimeError):
@@ -53,9 +54,13 @@ class EEGDBTCPClient:
         self.client_name = client_name
         self._sock: Optional[socket.socket] = None
 
+    @property
+    def is_connected(self) -> bool:
+        return self._sock is not None
+
     def connect(self) -> None:
         self.close()
-        sock = socket.create_connection((self.host, self.port), timeout=30)
+        sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
         self._write_frame(MSG_HANDSHAKE_REQ, self._encode_handshake(self.client_name))

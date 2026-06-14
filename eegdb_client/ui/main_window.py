@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,10 +30,11 @@ from PyQt6.QtWidgets import (
 from ..download.fetcher import download_study
 from ..readers.edf_reader import read_edf
 from ..readers.fif_reader import read_fif
-from ..transport.http_client import EEGDBHTTPClient
 from ..transport.tcp_client import EEGDBTCPClient
 from ..upload.pipeline import upload_source_file
 from .attrs_form import StudyAttrsForm
+
+T = TypeVar("T")
 
 
 class Worker(QThread):
@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("EEGDB Client")
         self.resize(960, 780)
         self._worker: Optional[Worker] = None
+        self._client: Optional[EEGDBTCPClient] = None
 
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -75,21 +76,29 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._build_browse_tab(), "Browse / Download")
         layout.addWidget(tabs)
         self.setCentralWidget(root)
+        self._update_conn_ui()
 
-    def _build_conn_box(self) -> QGroupBox:
-        box = QGroupBox("Connection")
-        form = QFormLayout(box)
+    def _build_conn_box(self) -> QWidget:
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(QLabel("Host"))
         self.host_edit = QLineEdit("127.0.0.1")
-        self.tcp_port_spin = QSpinBox()
-        self.tcp_port_spin.setRange(1, 65535)
-        self.tcp_port_spin.setValue(9090)
-        self.http_port_spin = QSpinBox()
-        self.http_port_spin.setRange(1, 65535)
-        self.http_port_spin.setValue(8080)
-        form.addRow("Host", self.host_edit)
-        form.addRow("TCP port", self.tcp_port_spin)
-        form.addRow("HTTP port", self.http_port_spin)
-        return box
+        self.host_edit.setMaximumWidth(160)
+        row.addWidget(self.host_edit)
+        row.addWidget(QLabel("Port"))
+        self.port_spin = QSpinBox()
+        self.port_spin.setRange(1, 65535)
+        self.port_spin.setValue(8081)
+        self.port_spin.setMaximumWidth(90)
+        row.addWidget(self.port_spin)
+        self.connect_btn = QPushButton("Connect")
+        self.connect_btn.clicked.connect(self._toggle_connection)
+        row.addWidget(self.connect_btn)
+        self.conn_status = QLabel("Not connected")
+        row.addWidget(self.conn_status)
+        row.addStretch()
+        return w
 
     def _build_upload_tab(self) -> QWidget:
         w = QWidget()
@@ -109,7 +118,7 @@ class MainWindow(QMainWindow):
         row.addWidget(browse_btn)
         layout.addLayout(row)
 
-        self.upload_btn = QPushButton("Upload via TCP")
+        self.upload_btn = QPushButton("Upload")
         self.upload_btn.clicked.connect(self._start_upload)
         layout.addWidget(self.upload_btn)
 
@@ -159,11 +168,73 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.dl_status)
         return w
 
-    def _tcp_client(self) -> EEGDBTCPClient:
-        return EEGDBTCPClient(self.host_edit.text().strip(), self.tcp_port_spin.value())
+    def _is_connected(self) -> bool:
+        return self._client is not None and self._client.is_connected
 
-    def _http_base(self) -> str:
-        return f"http://{self.host_edit.text().strip()}:{self.http_port_spin.value()}"
+    def _toggle_connection(self) -> None:
+        if self._is_connected():
+            self._disconnect()
+        else:
+            self._connect()
+
+    def _connect(self) -> None:
+        host = self.host_edit.text().strip()
+        if not host:
+            QMessageBox.warning(self, "Connect", "Enter a host.")
+            return
+        port = self.port_spin.value()
+        client = EEGDBTCPClient(host, port)
+        try:
+            client.connect()
+        except Exception as exc:
+            QMessageBox.critical(self, "Connect failed", str(exc))
+            return
+        self._client = client
+        self.conn_status.setText(f"Connected: {host}:{port}")
+        self._update_conn_ui()
+
+    def _disconnect(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+        self.conn_status.setText("Not connected")
+        self._update_conn_ui()
+
+    def _update_conn_ui(self) -> None:
+        connected = self._is_connected()
+        busy = self._worker is not None and self._worker.isRunning()
+        self.host_edit.setEnabled(not connected)
+        self.port_spin.setEnabled(not connected)
+        self.connect_btn.setEnabled(not busy)
+        self.connect_btn.setText("Disconnect" if connected else "Connect")
+        self.upload_btn.setEnabled(connected and not busy)
+        self.study_table.setEnabled(connected and not busy)
+
+    def _require_client(self) -> EEGDBTCPClient:
+        if not self._is_connected():
+            raise RuntimeError("Not connected. Click Connect first.")
+        return self._client  # type: ignore[return-value]
+
+    def _run_tcp(self, title: str, fn: Callable[[EEGDBTCPClient], T]) -> Optional[T]:
+        if not self._is_connected():
+            QMessageBox.warning(self, title, "Connect to the server first.")
+            return None
+        try:
+            return fn(self._require_client())
+        except Exception as exc:
+            self._on_tcp_error(title, exc)
+            return None
+
+    def _on_tcp_error(self, title: str, exc: Exception) -> None:
+        if self._is_connected():
+            self._disconnect()
+        QMessageBox.critical(self, title, str(exc))
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.wait()
+        self._disconnect()
+        super().closeEvent(event)
 
     def _pick_upload_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select EDF/FIF", "", "EEG files (*.edf *.bdf *.fif)")
@@ -175,15 +246,19 @@ class MainWindow(QMainWindow):
         if not path or not os.path.isfile(path):
             QMessageBox.warning(self, "Upload", "Select a valid file.")
             return
+        if not self._is_connected():
+            QMessageBox.warning(self, "Upload", "Connect to the server first.")
+            return
         self.upload_btn.setEnabled(False)
+        self.connect_btn.setEnabled(False)
         self.upload_progress.setValue(0)
         attrs = self.attrs_form.get_attrs()
+        client = self._require_client()
 
         def job(on_progress):
             ext = os.path.splitext(path)[1].lower()
             source = read_fif(path) if ext == ".fif" else read_edf(path)
-            with self._tcp_client() as client:
-                return upload_source_file(client, source, attrs, on_progress=on_progress)
+            return upload_source_file(client, source, attrs, on_progress=on_progress)
 
         self._worker = Worker(job)
         self._worker.progress.connect(lambda m, f: (self.upload_status.setText(m), self.upload_progress.setValue(int(f * 100))))
@@ -192,13 +267,13 @@ class MainWindow(QMainWindow):
         self._worker.start()
 
     def _upload_done(self, study_id: str) -> None:
-        self.upload_btn.setEnabled(True)
         self.upload_status.setText(f"Uploaded: {study_id}")
+        self._update_conn_ui()
         QMessageBox.information(self, "Upload", f"Study created: {study_id}")
 
     def _upload_failed(self, msg: str) -> None:
-        self.upload_btn.setEnabled(True)
-        QMessageBox.critical(self, "Upload failed", msg)
+        self._on_tcp_error("Upload failed", RuntimeError(msg))
+        self._update_conn_ui()
 
     def _fill_study_table(self, studies: list) -> None:
         self.study_table.setRowCount(len(studies))
@@ -212,14 +287,9 @@ class MainWindow(QMainWindow):
             self.study_table.setItem(row, 4, QTableWidgetItem(str(lab)))
 
     def _refresh_studies(self) -> None:
-        try:
-            EEGDBHTTPClient(self._http_base()).health()
-            with self._tcp_client() as client:
-                studies = client.list_studies()
-        except Exception as exc:
-            QMessageBox.critical(self, "Browse", str(exc))
-            return
-        self._fill_study_table(studies)
+        studies = self._run_tcp("Browse", lambda client: client.list_studies())
+        if studies is not None:
+            self._fill_study_table(studies)
 
     def _search_studies(self) -> None:
         attrs = {}
@@ -230,18 +300,17 @@ class MainWindow(QMainWindow):
         if not attrs:
             self._refresh_studies()
             return
-        try:
-            with self._tcp_client() as client:
-                studies = client.search_studies(attrs)
-        except Exception as exc:
-            QMessageBox.critical(self, "Search", str(exc))
-            return
-        self._fill_study_table(studies)
+        studies = self._run_tcp("Search", lambda client: client.search_studies(attrs))
+        if studies is not None:
+            self._fill_study_table(studies)
 
     def _start_download(self) -> None:
         rows = {idx.row() for idx in self.study_table.selectedIndexes()}
         if len(rows) != 1:
             QMessageBox.warning(self, "Download", "Select exactly one study.")
+            return
+        if not self._is_connected():
+            QMessageBox.warning(self, "Download", "Connect to the server first.")
             return
         row = next(iter(rows))
         study_id = self.study_table.item(row, 0).text()
@@ -250,16 +319,28 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save as", default_name, f"*.{fmt}")
         if not path:
             return
+        client = self._require_client()
+        self.connect_btn.setEnabled(False)
+        self.upload_btn.setEnabled(False)
+        self.study_table.setEnabled(False)
 
         def job(on_progress):
-            with self._tcp_client() as client:
-                return download_study(client, study_id, path, fmt=fmt, on_progress=on_progress)
+            return download_study(client, study_id, path, fmt=fmt, on_progress=on_progress)
 
         self._worker = Worker(job)
         self._worker.progress.connect(lambda m, f: (self.dl_status.setText(m), self.dl_progress.setValue(int(f * 100))))
-        self._worker.finished_ok.connect(lambda p: (self.dl_status.setText(f"Saved: {p}"), QMessageBox.information(self, "Download", f"Saved to {p}")))
-        self._worker.failed.connect(lambda m: QMessageBox.critical(self, "Download failed", m))
+        self._worker.finished_ok.connect(self._download_done)
+        self._worker.failed.connect(self._download_failed)
         self._worker.start()
+
+    def _download_done(self, saved_path: str) -> None:
+        self.dl_status.setText(f"Saved: {saved_path}")
+        self._update_conn_ui()
+        QMessageBox.information(self, "Download", f"Saved to {saved_path}")
+
+    def _download_failed(self, msg: str) -> None:
+        self._on_tcp_error("Download failed", RuntimeError(msg))
+        self._update_conn_ui()
 
 
 def run_app() -> None:

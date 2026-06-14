@@ -10,7 +10,6 @@ from .download.fetcher import download_study
 from .models import StudyAttrs
 from .readers.edf_reader import read_edf
 from .readers.fif_reader import read_fif
-from .transport.http_client import EEGDBHTTPClient
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
@@ -35,7 +34,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
-    with EEGDBTCPClient(args.host, args.tcp_port) as client:
+    with EEGDBTCPClient(args.host, args.port) as client:
         study_id = upload_source_file(
             client,
             source,
@@ -47,7 +46,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
-    with EEGDBTCPClient(args.host, args.tcp_port) as client:
+    with EEGDBTCPClient(args.host, args.port) as client:
         studies = client.list_studies()
     for s in studies:
         print(
@@ -60,7 +59,7 @@ def cmd_download(args: argparse.Namespace) -> None:
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
-    with EEGDBTCPClient(args.host, args.tcp_port) as client:
+    with EEGDBTCPClient(args.host, args.port) as client:
         path = download_study(
             client,
             args.study_id,
@@ -72,20 +71,19 @@ def cmd_download(args: argparse.Namespace) -> None:
 
 
 def cmd_health(args: argparse.Namespace) -> None:
-    base = f"http://{args.host}:{args.http_port}"
-    data = EEGDBHTTPClient(base).health()
-    print(data)
+    with EEGDBTCPClient(args.host, args.port) as client:
+        studies = client.list_studies()
+    print(f"ok  host={args.host}  port={args.port}  studies={len(studies)}")
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="eegdb-client")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--tcp-port", type=int, default=9090)
-    parser.add_argument("--http-port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_health = sub.add_parser("health", help="HTTP health check")
+    p_health = sub.add_parser("health", help="TCP connection check")
     p_health.set_defaults(func=cmd_health)
 
     p_upload = sub.add_parser("upload", help="Upload EDF/BDF/FIF via TCP")
