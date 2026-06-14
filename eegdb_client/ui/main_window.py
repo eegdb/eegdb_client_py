@@ -92,6 +92,17 @@ class MainWindow(QMainWindow):
         self.port_spin.setValue(8081)
         self.port_spin.setMaximumWidth(90)
         row.addWidget(self.port_spin)
+        row.addWidget(QLabel("Token name"))
+        self.token_name_edit = QLineEdit()
+        self.token_name_edit.setPlaceholderText("optional")
+        self.token_name_edit.setMaximumWidth(120)
+        row.addWidget(self.token_name_edit)
+        row.addWidget(QLabel("API token"))
+        self.api_token_edit = QLineEdit()
+        self.api_token_edit.setPlaceholderText("optional")
+        self.api_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_token_edit.setMaximumWidth(200)
+        row.addWidget(self.api_token_edit)
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self._toggle_connection)
         row.addWidget(self.connect_btn)
@@ -183,7 +194,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Connect", "Enter a host.")
             return
         port = self.port_spin.value()
-        client = EEGDBTCPClient(host, port)
+        client = EEGDBTCPClient(
+            host,
+            port,
+            token_name=self.token_name_edit.text().strip(),
+            api_token=self.api_token_edit.text().strip(),
+        )
         try:
             client.connect()
         except Exception as exc:
@@ -205,6 +221,8 @@ class MainWindow(QMainWindow):
         busy = self._worker is not None and self._worker.isRunning()
         self.host_edit.setEnabled(not connected)
         self.port_spin.setEnabled(not connected)
+        self.token_name_edit.setEnabled(not connected)
+        self.api_token_edit.setEnabled(not connected)
         self.connect_btn.setEnabled(not busy)
         self.connect_btn.setText("Disconnect" if connected else "Connect")
         self.upload_btn.setEnabled(connected and not busy)

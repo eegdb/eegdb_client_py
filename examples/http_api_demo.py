@@ -29,13 +29,46 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 import requests
 
+from eegdb_client.auth_proof import compute_proof
+
+
+class _ProofSession(requests.Session):
+    def __init__(self, base_url: str, token_name: str, api_token: str):
+        super().__init__()
+        self._base_url = base_url.rstrip("/")
+        self._token_name = token_name
+        self._api_token = api_token
+
+    def request(self, method, url, **kwargs):
+        headers = dict(kwargs.pop("headers", {}) or {})
+        if self._api_token and self._token_name:
+            path = url[len(self._base_url) :] if url.startswith(self._base_url) else url
+            if path not in ("/health", "/api/v1/auth/nonce"):
+                nonce_resp = super().request(
+                    "GET", f"{self._base_url}/api/v1/auth/nonce", timeout=30
+                )
+                nonce_resp.raise_for_status()
+                nonce_data = nonce_resp.json()
+                if nonce_data.get("auth_enabled"):
+                    nonce_hex = nonce_data["nonce"]
+                    nonce = bytes.fromhex(nonce_hex)
+                    proof = compute_proof(self._api_token, nonce)
+                    headers["X-EEGDB-Nonce"] = nonce_hex
+                    headers["Authorization"] = f"EEGDB-Proof {self._token_name}:{proof.hex()}"
+        return super().request(method, url, headers=headers, **kwargs)
+
 
 class EEGDBClient:
     """EEGDB HTTP API 客户端"""
 
-    def __init__(self, base_url: str = "http://localhost:8080"):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8080",
+        token_name: str = "",
+        api_token: str = "",
+    ):
         self.base_url = base_url.rstrip("/")
-        self.session = requests.Session()
+        self.session = _ProofSession(self.base_url, token_name, api_token)
 
     # ------------------------------------------------------------------
     # 健康检查 / 统计
@@ -546,6 +579,10 @@ def main():
     )
     parser.add_argument("--server", default="http://localhost:8080",
                         help="EEGDB server URL")
+    parser.add_argument("--token-name", default="",
+                        help="API token name (when server auth enabled)")
+    parser.add_argument("--api-token", default="",
+                        help="API token secret (when server auth enabled)")
     parser.add_argument("--edf", required=True,
                         help="Input EDF file path")
     parser.add_argument("--study-name", default="edf-api-demo",
@@ -560,7 +597,7 @@ def main():
                         help="Skip comparing original and downloaded EDF")
     args = parser.parse_args()
 
-    client = EEGDBClient(args.server)
+    client = EEGDBClient(args.server, token_name=args.token_name, api_token=args.api_token)
 
     # 健康检查
     try:

@@ -41,6 +41,8 @@ python -m eegdb_client
 
 Connect to your EEGDB host (default TCP port `8081`), pick a file, set study attributes, then upload or download.
 
+When the server has `auth.enabled: true`, fill in **Token name** and **API token** (from `eegdb -auth-token-create`).
+
 ## CLI
 
 ```bash
@@ -50,17 +52,34 @@ python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 ```
 
-Options: `--host`, `--port`, `-v`.
+Options: `--host`, `--port`, `--token-name`, `--api-token`, `-v`.
+
+With auth enabled:
+
+```bash
+python -m eegdb_client upload recording.edf \
+  --token-name uploader --api-token eegdb_...
+```
 
 ## HTTP API demo
 
 ```bash
 python examples/http_api_demo.py \
   --server http://localhost:8080 \
+  --token-name uploader --api-token eegdb_... \
   --edf recording.edf \
   --study-name demo-study \
   --output rebuilt.edf
 ```
+
+## Authentication
+
+EEGDB uses challenge-response auth; **plaintext tokens are never sent on the wire**.
+
+- **TCP**: after handshake, server sends a 32-byte nonce; client replies with `MsgAuthProof` using `SHA256(SHA256(secret) || nonce)`.
+- **HTTP**: `GET /api/v1/auth/nonce`, then headers `X-EEGDB-Nonce` and `Authorization: EEGDB-Proof <name>:<proof_hex>`.
+
+Clients need both **token name** (public identifier) and **token secret** (shown once at creation).
 
 ## Build standalone app
 

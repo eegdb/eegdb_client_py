@@ -14,6 +14,15 @@ from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
 
+def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
+    return EEGDBTCPClient(
+        args.host,
+        args.port,
+        token_name=args.token_name,
+        api_token=args.api_token,
+    )
+
+
 def _load_source(path: str):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".fif":
@@ -34,7 +43,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
-    with EEGDBTCPClient(args.host, args.port) as client:
+    with _tcp_client(args) as client:
         study_id = upload_source_file(
             client,
             source,
@@ -46,7 +55,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
-    with EEGDBTCPClient(args.host, args.port) as client:
+    with _tcp_client(args) as client:
         studies = client.list_studies()
     for s in studies:
         print(
@@ -59,7 +68,7 @@ def cmd_download(args: argparse.Namespace) -> None:
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
-    with EEGDBTCPClient(args.host, args.port) as client:
+    with _tcp_client(args) as client:
         path = download_study(
             client,
             args.study_id,
@@ -71,7 +80,7 @@ def cmd_download(args: argparse.Namespace) -> None:
 
 
 def cmd_health(args: argparse.Namespace) -> None:
-    with EEGDBTCPClient(args.host, args.port) as client:
+    with _tcp_client(args) as client:
         studies = client.list_studies()
     print(f"ok  host={args.host}  port={args.port}  studies={len(studies)}")
 
@@ -80,6 +89,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="eegdb-client")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8081)
+    parser.add_argument("--token-name", default="", help="API token name (when server auth enabled)")
+    parser.add_argument("--api-token", default="", help="API token secret (when server auth enabled)")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 

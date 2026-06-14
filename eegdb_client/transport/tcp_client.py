@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from ..auth_proof import compute_proof
 from ..models import DT_FLOAT32, DT_FLOAT64, DT_INT16, DT_INT24, DT_INT64, Event
 
 MAGIC = b"EE"
@@ -17,6 +18,8 @@ PROTOCOL_VERSION = 2
 
 MSG_HANDSHAKE_REQ = 0x01
 MSG_HANDSHAKE_RESP = 0x02
+MSG_AUTH_PROOF = 0x03
+MSG_AUTH_RESP = 0x04
 MSG_WRITE_BATCH = 0x11
 MSG_CREATE_STUDY = 0x12
 MSG_WRITE_EVENTS = 0x13
@@ -48,10 +51,19 @@ class TCPError(RuntimeError):
 
 
 class EEGDBTCPClient:
-    def __init__(self, host: str, port: int, client_name: str = "eegdb-client"):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        client_name: str = "eegdb-client",
+        token_name: str = "",
+        api_token: str = "",
+    ):
         self.host = host
         self.port = port
         self.client_name = client_name
+        self.token_name = token_name
+        self.api_token = api_token
         self._sock: Optional[socket.socket] = None
 
     @property
@@ -67,9 +79,21 @@ class EEGDBTCPClient:
         msg_type, payload = self._read_frame()
         if msg_type != MSG_HANDSHAKE_RESP:
             raise TCPError(0, f"expected handshake resp, got {msg_type:#04x}")
-        status = payload[0]
+        status, _, nonce = self._decode_handshake_resp(payload)
         if status != 0:
             raise TCPError(status, "handshake failed")
+        if nonce:
+            if not self.api_token or not self.token_name:
+                raise TCPError(0, "server requires auth; provide token_name and api_token")
+            proof = compute_proof(self.api_token, nonce)
+            auth_payload = self._encode_auth_proof(self.token_name, proof)
+            self._write_frame(MSG_AUTH_PROOF, auth_payload)
+            auth_type, auth_resp = self._read_frame()
+            if auth_type != MSG_AUTH_RESP:
+                raise TCPError(0, f"expected auth resp, got {auth_type:#04x}")
+            if not auth_resp or auth_resp[0] != 0:
+                code = auth_resp[0] if auth_resp else 0
+                raise TCPError(code, "auth failed")
 
     def close(self) -> None:
         if self._sock is not None:
@@ -263,6 +287,23 @@ class EEGDBTCPClient:
     def _encode_handshake(client_name: str) -> bytes:
         name = client_name.encode("utf-8")
         return struct.pack("<BB", PROTOCOL_VERSION, len(name)) + name
+
+    @staticmethod
+    def _decode_handshake_resp(payload: bytes) -> Tuple[int, str, bytes]:
+        status = payload[0]
+        ver_len = payload[1]
+        ver = payload[2 : 2 + ver_len].decode("utf-8")
+        off = 2 + ver_len
+        nonce = b""
+        if off < len(payload):
+            nonce_len = payload[off]
+            nonce = payload[off + 1 : off + 1 + nonce_len]
+        return status, ver, nonce
+
+    @staticmethod
+    def _encode_auth_proof(token_name: str, proof: bytes) -> bytes:
+        name = token_name.encode("utf-8")
+        return struct.pack("<B", len(name)) + name + proof
 
     @staticmethod
     def _encode_study_id(study_id: str) -> bytes:
