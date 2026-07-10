@@ -7,32 +7,35 @@ import os
 import numpy as np
 import pyedflib
 
-from ..models import DT_INT16, ChannelDef, SourceFile
+from ..models import DT_INT16, DT_INT24, ChannelDef, SourceFile
 
 
 def read_edf(path: str) -> SourceFile:
     f = pyedflib.EdfReader(path)
     try:
+        is_bdf = f.filetype in (pyedflib.FILETYPE_BDF, pyedflib.FILETYPE_BDFPLUS)
+        data_type = DT_INT24 if is_bdf else DT_INT16
         n_signals = f.signals_in_file
         channels: list[ChannelDef] = []
         channel_data: dict[int, np.ndarray] = {}
 
         for i in range(n_signals):
-            dig_min = f.getDigitalMinimum(i)
-            dig_max = f.getDigitalMaximum(i)
-            phys_min = f.getPhysicalMinimum(i)
-            phys_max = f.getPhysicalMaximum(i)
+            dig_min = int(f.getDigitalMinimum(i))
+            dig_max = int(f.getDigitalMaximum(i))
+            phys_min = float(f.getPhysicalMinimum(i))
+            phys_max = float(f.getPhysicalMaximum(i))
             scale = 1.0
             offset = 0.0
             if dig_max != dig_min:
                 scale = (phys_max - phys_min) / (dig_max - dig_min)
                 offset = phys_min - scale * dig_min
 
+            spr = int(f.smp_per_record(i))
             ch = ChannelDef(
                 label=f.getLabel(i).strip(),
                 channel_id=i,
-                sample_rate=f.getSampleFrequency(i),
-                data_type=DT_INT16,
+                sample_rate=float(f.getSampleFrequency(i)),
+                data_type=data_type,
                 unit=f.getPhysicalDimension(i).strip() or "uV",
                 physical_min=phys_min,
                 physical_max=phys_max,
@@ -42,21 +45,12 @@ def read_edf(path: str) -> SourceFile:
                 offset=offset,
                 transducer=f.getTransducer(i).strip(),
                 prefilter=f.getPrefilter(i).strip(),
-                samples_per_record=int(f.getNSamples()[i]),
+                samples_per_record=spr,
             )
             channels.append(ch)
-            physical = f.readSignal(i)
-            if dig_max != dig_min:
-                digital = np.clip(
-                    ((physical - phys_min) / (phys_max - phys_min) * (dig_max - dig_min) + dig_min),
-                    dig_min,
-                    dig_max,
-                ).astype(np.int16)
-            else:
-                digital = np.zeros(len(physical), dtype=np.int16)
-            channel_data[i] = digital
+            channel_data[i] = _read_digital(f, i, data_type)
 
-        fmt = "bdf" if f.filetype in (pyedflib.FILETYPE_BDF, pyedflib.FILETYPE_BDFPLUS) else "edf"
+        fmt = "bdf" if is_bdf else "edf"
         return SourceFile(
             path=path,
             format=fmt,
@@ -70,3 +64,12 @@ def read_edf(path: str) -> SourceFile:
         )
     finally:
         f.close()
+
+
+def _read_digital(f: pyedflib.EdfReader, signal_idx: int, data_type: int) -> np.ndarray:
+    n = int(f.getNSamples()[signal_idx])
+    buf = np.zeros(n, dtype=np.int32)
+    f.read_digital_signal(signal_idx, 0, n, buf)
+    if data_type == DT_INT16:
+        return buf.astype(np.int16)
+    return buf

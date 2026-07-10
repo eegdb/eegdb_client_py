@@ -77,14 +77,3 @@ class SourceFile:
     start_time: Optional[datetime] = None
     data_record_dur_sec: float = 1.0
     channel_data: Dict[int, Any] = field(default_factory=dict)
-
-
-@dataclass
-class StudySummary:
-    study_id: str
-    name: str
-    num_samples: int = 0
-    num_channels: int = 0
-    created_at: str = ""
-    attributes: Dict[str, Any] = field(default_factory=dict)
-    source_file_format: str = ""

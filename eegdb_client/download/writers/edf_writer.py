@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pyedflib
 
-from ...models import DT_FLOAT32, Event
+from ...models import DT_FLOAT32, DT_INT24, Event
 
 
 def write_edf_from_study(
@@ -52,17 +52,23 @@ def write_edf_from_study(
             arr = channel_data[ch_id]
             if ch.get("data_type") == DT_FLOAT32:
                 phys = arr.astype(np.float64)
+                dig_min = -32768
+                dig_max = 32767
             else:
-                dig_min = ch.get("digital_min", -32768)
-                dig_max = ch.get("digital_max", 32767)
-                phys_min = ch.get("physical_min", -32768.0)
-                phys_max = ch.get("physical_max", 32767.0)
+                if ch.get("data_type") == DT_INT24:
+                    dig_min = int(ch.get("digital_min", -8388608))
+                    dig_max = int(ch.get("digital_max", 8388607))
+                else:
+                    dig_min = int(ch.get("digital_min", -32768))
+                    dig_max = int(ch.get("digital_max", 32767))
+                phys_min = float(ch.get("physical_min", dig_min))
+                phys_max = float(ch.get("physical_max", dig_max))
                 scale = (phys_max - phys_min) / (dig_max - dig_min) if dig_max != dig_min else 1.0
                 offset = phys_min - scale * dig_min
                 phys = arr.astype(np.float64) * scale + offset
 
-            sr = ch.get("sample_rate", 256.0)
-            spr = max(1, int(round(sr)))
+            sr = float(ch.get("sample_rate", 256.0))
+            spr = int(ch.get("samples_per_record") or 0) or max(1, int(round(sr)))
             headers.append(
                 {
                     "label": str(ch.get("label", ""))[:16],
@@ -70,8 +76,8 @@ def write_edf_from_study(
                     "sample_frequency": spr,
                     "physical_min": float(np.min(phys)),
                     "physical_max": float(np.max(phys)),
-                    "digital_min": ch.get("digital_min", -32768),
-                    "digital_max": ch.get("digital_max", 32767),
+                    "digital_min": dig_min,
+                    "digital_max": dig_max,
                     "transducer": str(ch.get("transducer", ""))[:80],
                     "prefilter": str(ch.get("prefilter", ""))[:80],
                 }

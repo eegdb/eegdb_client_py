@@ -53,6 +53,11 @@ def download_study(
 
     events = client.read_events(study_id)
     ext = fmt.lower()
+    if ext == "edf" and any(int(ch.get("data_type", 0)) == 0x02 for ch in channels):
+        # EDF is 16-bit; INT24 studies must be written as BDF.
+        ext = "bdf"
+        root, _ = os.path.splitext(output_path)
+        output_path = root + ".bdf"
     if ext == "fif":
         write_fif_from_study(output_path, study, channel_data, events)
     else:

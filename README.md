@@ -1,16 +1,14 @@
 # eegdb_client_py
 
-Python clients for [EEGDB](https://github.com/eegdb/eegdb): a desktop GUI/CLI client and an HTTP API demo script.
+Python TCP client for [EEGDB](https://github.com/eegdb/eegdb): PyQt6 desktop GUI and CLI for EDF/BDF/FIF/CDT upload and download.
 
 ## Project layout
 
 ```
 eegdb_client_py/
 ├── app.py                 # GUI entry (Run / PyInstaller)
-├── requirements.txt       # all Python dependencies
-├── eegdb_client/          # library package (UI, CLI, transport, readers)
-├── examples/
-│   └── http_api_demo.py   # standalone HTTP REST API demo
+├── requirements.txt
+├── eegdb_client/          # library package (UI, CLI, TCP, readers)
 └── scripts/               # build scripts and utilities
 ```
 
@@ -18,7 +16,6 @@ eegdb_client_py/
 |------|-------------|
 | `app.py` | Launch PyQt6 desktop GUI |
 | `eegdb_client/` | Package: GUI, CLI, TCP upload/download |
-| `examples/http_api_demo.py` | HTTP API demo: import EDF, query channels, rebuild EDF |
 
 ## Requirements
 
@@ -48,9 +45,15 @@ When the server has `auth.enabled: true`, fill in **Token name** and **API token
 ```bash
 python -m eegdb_client health
 python -m eegdb_client upload recording.edf --lab mylab --paradigm resting
+python -m eegdb_client upload recording.cdt --lab mylab
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 ```
+
+Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt` / `.ceo` / `.dap` / `.rs3` / `.rs4`).
+
+FLOAT channels are uploaded as-is over TCP. Compression (including µV-step lossy for FLOAT)
+is configured on the EEGDB server, e.g. `storage.import_lossy_codec: uv0.1`.
 
 Options: `--host`, `--port`, `--token-name`, `--api-token`, `-v`.
 
@@ -61,23 +64,11 @@ python -m eegdb_client upload recording.edf \
   --token-name uploader --api-token eegdb_...
 ```
 
-## HTTP API demo
-
-```bash
-python examples/http_api_demo.py \
-  --server http://localhost:8080 \
-  --token-name uploader --api-token eegdb_... \
-  --edf recording.edf \
-  --study-name demo-study \
-  --output rebuilt.edf
-```
-
 ## Authentication
 
-EEGDB uses challenge-response auth; **plaintext tokens are never sent on the wire**.
+EEGDB TCP uses challenge-response auth; **plaintext tokens are never sent on the wire**.
 
-- **TCP**: after handshake, server sends a 32-byte nonce; client replies with `MsgAuthProof` using `SHA256(SHA256(secret) || nonce)`.
-- **HTTP**: `GET /api/v1/auth/nonce`, then headers `X-EEGDB-Nonce` and `Authorization: EEGDB-Proof <name>:<proof_hex>`.
+After handshake, the server may send a 32-byte nonce; the client replies with `MsgAuthProof` using `SHA256(SHA256(secret) || nonce)`.
 
 Clients need both **token name** (public identifier) and **token secret** (shown once at creation).
 

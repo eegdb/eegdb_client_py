@@ -28,8 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..download.fetcher import download_study
-from ..readers.edf_reader import read_edf
-from ..readers.fif_reader import read_fif
+from ..readers import load_source_file
 from ..transport.tcp_client import EEGDBTCPClient
 from ..upload.pipeline import upload_source_file
 from .attrs_form import StudyAttrsForm
@@ -255,7 +254,12 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _pick_upload_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select EDF/FIF", "", "EEG files (*.edf *.bdf *.fif)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select EEG file",
+            "",
+            "EEG files (*.edf *.bdf *.fif *.cdt *.ceo *.dap *.rs3 *.rs4)",
+        )
         if path:
             self.file_edit.setText(path)
 
@@ -274,9 +278,13 @@ class MainWindow(QMainWindow):
         client = self._require_client()
 
         def job(on_progress):
-            ext = os.path.splitext(path)[1].lower()
-            source = read_fif(path) if ext == ".fif" else read_edf(path)
-            return upload_source_file(client, source, attrs, on_progress=on_progress)
+            source = load_source_file(path)
+            return upload_source_file(
+                client,
+                source,
+                attrs,
+                on_progress=on_progress,
+            )
 
         self._worker = Worker(job)
         self._worker.progress.connect(lambda m, f: (self.upload_status.setText(m), self.upload_progress.setValue(int(f * 100))))

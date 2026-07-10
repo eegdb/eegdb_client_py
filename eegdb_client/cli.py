@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 
 from .download.fetcher import download_study
 from .models import StudyAttrs
-from .readers.edf_reader import read_edf
-from .readers.fif_reader import read_fif
+from .readers import load_source_file
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
@@ -23,17 +20,11 @@ def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
     )
 
 
-def _load_source(path: str):
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".fif":
-        return read_fif(path)
-    if ext in (".edf", ".bdf"):
-        return read_edf(path)
-    raise SystemExit(f"unsupported file type: {ext}")
-
-
 def cmd_upload(args: argparse.Namespace) -> None:
-    source = _load_source(args.file)
+    try:
+        source = load_source_file(args.file)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     attrs = StudyAttrs(
         lab=args.lab or "",
         paradigm=args.paradigm or "",
@@ -97,12 +88,12 @@ def main(argv: list[str] | None = None) -> None:
     p_health = sub.add_parser("health", help="TCP connection check")
     p_health.set_defaults(func=cmd_health)
 
-    p_upload = sub.add_parser("upload", help="Upload EDF/BDF/FIF via TCP")
+    p_upload = sub.add_parser("upload", help="Upload EDF/BDF/FIF/CDT via TCP")
     p_upload.add_argument("file")
     p_upload.add_argument("--lab", default="")
     p_upload.add_argument("--paradigm", default="")
     p_upload.add_argument("--device", default="")
-    p_upload.add_argument("--batch-seconds", type=float, default=1.0)
+    p_upload.add_argument("--batch-seconds", type=float, default=10.0)
     p_upload.set_defaults(func=cmd_upload)
 
     p_list = sub.add_parser("list", help="List studies via TCP")
