@@ -66,6 +66,8 @@ def cmd_download(args: argparse.Namespace) -> None:
             args.output,
             fmt=args.format,
             on_progress=progress if args.verbose else None,
+            local_decode=args.local_decode,
+            block_codec=args.codec,
         )
     print(path)
 
@@ -102,7 +104,24 @@ def main(argv: list[str] | None = None) -> None:
     p_dl = sub.add_parser("download", help="Download study via TCP")
     p_dl.add_argument("study_id")
     p_dl.add_argument("-o", "--output", required=True)
-    p_dl.add_argument("-f", "--format", default="edf", choices=["edf", "bdf", "fif"])
+    p_dl.add_argument(
+        "-f",
+        "--format",
+        default="edf",
+        choices=["edf", "bdf", "fif", "npz"],
+        help="output format (default: edf)",
+    )
+    p_dl.add_argument(
+        "--local-decode",
+        action="store_true",
+        help="download compressed batches and decode locally with eegdb-codec",
+    )
+    p_dl.add_argument(
+        "--codec",
+        default="best",
+        choices=["lz4", "zstd", "flac", "wavpack", "best"],
+        help="block codec for --local-decode (server re-encodes the batch; default: best)",
+    )
     p_dl.set_defaults(func=cmd_download)
 
     args = parser.parse_args(argv)

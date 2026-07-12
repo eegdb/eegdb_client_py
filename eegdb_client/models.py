@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
-# Data types matching pkg/common/const.go
+# Data types matching eegdb-codec pkg/wire (and EEGDB SSTable / TCP).
 DT_INT16 = 0x01
 DT_INT24 = 0x02
 DT_FLOAT32 = 0x03

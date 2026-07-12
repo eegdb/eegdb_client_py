@@ -28,6 +28,21 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Optional: local decode (`eegdb-codec`)
+
+For `--local-decode`, install the native read codec from the sibling
+[eegdb-codec](https://github.com/eegdb/eegdb-codec) repo (current architecture:
+`pkg/wire` + `pkg/codec` C ABI):
+
+```bash
+cd ../eegdb-codec
+make codec-wheel
+pip install dist/python/eegdb_codec-*.whl
+```
+
+Or point `EEGDB_CODEC_LIB` at `libeegdbcodec.so` / `.dylib` / `.dll` and install
+the Python package (`pip install -e ../eegdb-codec/python`).
+
 ## Desktop GUI
 
 ```bash
@@ -49,6 +64,20 @@ python -m eegdb_client upload recording.cdt --lab mylab
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 ```
+
+Download with **local** eegdb-codec decode (TCP `ReadCompressedBatch` + native decode):
+
+```bash
+python -m eegdb_client download <study_id> \
+  --format npz \
+  --local-decode \
+  --codec lz4 \
+  -o subject01.npz
+```
+
+`--codec` selects the server-side block codec used to re-encode each batch
+(`lz4|zstd|flac|wavpack|best`). The response carries a wire `algo` byte; the
+client calls `eegdb_codec.EEGDBCodec.decode(data_type, algo, …)`.
 
 Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt` / `.ceo` / `.dap` / `.rs3` / `.rs4`).
 
@@ -87,4 +116,5 @@ chmod +x scripts/build_linux.sh
 ## Related
 
 - [EEGDB server](https://github.com/eegdb/eegdb)
+- [eegdb-codec](https://github.com/eegdb/eegdb-codec) — wire constants + native read codec
 - [go-edflib](https://github.com/eegdb/go-edflib)

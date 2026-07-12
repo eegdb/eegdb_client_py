@@ -9,6 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -164,11 +165,19 @@ class MainWindow(QMainWindow):
 
         dl_row = QHBoxLayout()
         self.fmt_combo = QComboBox()
-        self.fmt_combo.addItems(["edf", "bdf", "fif"])
+        self.fmt_combo.addItems(["edf", "bdf", "fif", "npz"])
+        self.local_decode_cb = QCheckBox("Local decode (eegdb-codec)")
+        self.codec_combo = QComboBox()
+        self.codec_combo.addItems(["best", "lz4", "zstd", "flac", "wavpack"])
+        self.codec_combo.setEnabled(False)
+        self.local_decode_cb.toggled.connect(self.codec_combo.setEnabled)
         dl_btn = QPushButton("Download selected")
         dl_btn.clicked.connect(self._start_download)
         dl_row.addWidget(QLabel("Format"))
         dl_row.addWidget(self.fmt_combo)
+        dl_row.addWidget(self.local_decode_cb)
+        dl_row.addWidget(QLabel("Codec"))
+        dl_row.addWidget(self.codec_combo)
         dl_row.addWidget(dl_btn)
         layout.addLayout(dl_row)
 
@@ -351,7 +360,15 @@ class MainWindow(QMainWindow):
         self.study_table.setEnabled(False)
 
         def job(on_progress):
-            return download_study(client, study_id, path, fmt=fmt, on_progress=on_progress)
+            return download_study(
+                client,
+                study_id,
+                path,
+                fmt=fmt,
+                on_progress=on_progress,
+                local_decode=self.local_decode_cb.isChecked(),
+                block_codec=self.codec_combo.currentText(),
+            )
 
         self._worker = Worker(job)
         self._worker.progress.connect(lambda m, f: (self.dl_status.setText(m), self.dl_progress.setValue(int(f * 100))))

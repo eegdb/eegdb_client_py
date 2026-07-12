@@ -5,7 +5,9 @@ matching EDF import's multi-channel time blocks so memtable flush can form the s
 SSTable block shape.
 
 FLOAT channels are uploaded as-is; compression / µV lossy quantize is done by the
-EEGDB server (eegdb-codec), not the Python client.
+EEGDB server via eegdb-codec (pkg/codec), not the Python client.
+Download may optionally use TCP ReadCompressedBatch + local eegdb_codec decode
+(--local-decode).
 """
 
 from __future__ import annotations

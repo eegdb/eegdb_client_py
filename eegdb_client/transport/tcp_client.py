@@ -34,6 +34,8 @@ MSG_READ_BATCH_REQ = 0x46
 MSG_READ_BATCH_RESP = 0x47
 MSG_READ_EVENTS_REQ = 0x48
 MSG_READ_EVENTS_RESP = 0x49
+MSG_READ_COMPRESSED_BATCH_REQ = 0x4A
+MSG_READ_COMPRESSED_BATCH_RESP = 0x4B
 MSG_CLOSE = 0xFF
 
 MAX_READ_BATCH = 65536
@@ -219,6 +221,37 @@ class EEGDBTCPClient:
             raise TCPError(0, f"unexpected msg {msg_type:#04x}")
         return self._decode_write_batch(resp)
 
+    def read_compressed_batch(
+        self,
+        study_id: str,
+        channel_id: int,
+        data_type: int,
+        start_index: int,
+        sample_count: int,
+        block_codec: int,
+    ) -> Tuple[int, int, int, bytes]:
+        """ReadCompressedBatch (0x4A/0x4B).
+
+        Returns (start_index, sample_count, algo, compressed_payload).
+        ``block_codec`` is the Go BlockCodec id (0=lz4 … 4=best).
+        Client decodes ``compressed_payload`` with eegdb_codec using ``algo``.
+        """
+        if sample_count <= 0 or sample_count > MAX_READ_BATCH:
+            raise ValueError(f"sample_count must be 1..{MAX_READ_BATCH}")
+        if not 0 <= int(block_codec) <= 4:
+            raise ValueError(f"block_codec must be 0..4, got {block_codec}")
+        payload = self._encode_read_compressed_batch_req(
+            study_id, channel_id, data_type, start_index, sample_count, int(block_codec)
+        )
+        self._write_frame(MSG_READ_COMPRESSED_BATCH_REQ, payload)
+        msg_type, resp = self._read_frame()
+        if msg_type == MSG_ERROR:
+            raise self._parse_error(resp)
+        if msg_type != MSG_READ_COMPRESSED_BATCH_RESP:
+            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
+        start, count, algo, compressed = self._decode_read_compressed_batch(resp)
+        return start, count, algo, compressed
+
     def read_events(self, study_id: str, filter_json: Optional[Dict[str, Any]] = None) -> List[Event]:
         fj = json.dumps(filter_json or {}).encode("utf-8")
         sid = study_id.encode("utf-8")
@@ -238,14 +271,36 @@ class EEGDBTCPClient:
         data_type: int,
         total_samples: int,
         batch_size: int = 8192,
+        *,
+        local_decode: bool = False,
+        block_codec: int = 4,
+        codec: Any = None,
     ) -> np.ndarray:
+        """Fetch a full channel.
+
+        When ``local_decode`` is True, uses ReadCompressedBatch and decodes with
+        ``codec`` (eegdb_client.codec_local.LocalCodec). Otherwise uses server-side
+        ReadBatch (uncompressed samples on the wire).
+        """
         chunks: List[np.ndarray] = []
         start = 0
         while start < total_samples:
             count = min(batch_size, total_samples - start)
-            _, arr = self.read_batch(study_id, channel_id, data_type, start, count)
-            chunks.append(arr)
-            start += count
+            if local_decode:
+                if codec is None:
+                    raise ValueError("local_decode requires a LocalCodec instance")
+                _, got, algo, compressed = self.read_compressed_batch(
+                    study_id, channel_id, data_type, start, count, block_codec
+                )
+                if got == 0:
+                    break
+                arr = codec.decode(data_type, algo, got, compressed)
+                chunks.append(arr)
+                start += got
+            else:
+                _, arr = self.read_batch(study_id, channel_id, data_type, start, count)
+                chunks.append(arr)
+                start += count
         if not chunks:
             return np.array([], dtype=self._numpy_dtype(data_type))
         return np.concatenate(chunks)
@@ -449,6 +504,23 @@ class EEGDBTCPClient:
             + struct.pack("<I", sample_count)
         )
 
+    @staticmethod
+    def _encode_read_compressed_batch_req(
+        study_id: str,
+        channel_id: int,
+        data_type: int,
+        start_index: int,
+        sample_count: int,
+        block_codec: int,
+    ) -> bytes:
+        sid = study_id.encode("utf-8")
+        return (
+            struct.pack("<B", len(sid))
+            + sid
+            + struct.pack("<HBQ", channel_id, data_type, start_index)
+            + struct.pack("<IB", sample_count, block_codec & 0xFF)
+        )
+
     def _decode_write_batch(self, data: bytes) -> Tuple[int, np.ndarray]:
         off = 0
         id_len = data[off]
@@ -461,6 +533,28 @@ class EEGDBTCPClient:
         dtype = self._numpy_dtype(data_type)
         arr = np.frombuffer(raw, dtype=dtype, count=sample_count)
         return start_index, arr.copy()
+
+    @staticmethod
+    def _decode_read_compressed_batch(data: bytes) -> Tuple[int, int, int, bytes]:
+        """Returns (start_index, sample_count, algo, compressed_payload)."""
+        if len(data) < 1 + 2 + 1 + 8 + 4 + 1 + 4:
+            raise TCPError(0, "read compressed batch resp too short")
+        id_len = data[0]
+        off = 1 + id_len
+        if off + 2 + 1 + 8 + 4 + 1 + 4 > len(data):
+            raise TCPError(0, "truncated read compressed batch resp header")
+        # channel_id, data_type unused by caller but present on wire
+        _channel_id, _data_type, start_index = struct.unpack_from("<HBQ", data, off)
+        off += 11
+        sample_count = struct.unpack_from("<I", data, off)[0]
+        off += 4
+        algo = data[off]
+        off += 1
+        payload_len = struct.unpack_from("<I", data, off)[0]
+        off += 4
+        if payload_len < 0 or off + payload_len > len(data):
+            raise TCPError(0, "truncated compressed payload")
+        return start_index, sample_count, algo, data[off : off + payload_len]
 
     @staticmethod
     def _encode_events(events: List[Event]) -> bytes:
