@@ -12,12 +12,20 @@ hiddenimports = [
     'eegdb_client.cli',
     'eegdb_client.ui.main_window',
     'eegdb_client.ui.attrs_form',
+    'eegdb_client.ui.workers',
+    'eegdb_client.ui.pages',
+    'eegdb_client.ui.pages.connect_page',
+    'eegdb_client.ui.pages.upload_page',
+    'eegdb_client.ui.pages.browse_page',
+    'qfluentwidgets',
 ]
 tmp_ret = collect_all('mne')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PyQt6')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pyedflib')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('qfluentwidgets')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 

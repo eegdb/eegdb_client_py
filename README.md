@@ -1,6 +1,6 @@
 # eegdb_client_py
 
-Python TCP client for [EEGDB](https://github.com/eegdb/eegdb): PyQt6 desktop GUI and CLI for EDF/BDF/FIF/CDT upload and download.
+Python TCP client for [EEGDB](https://github.com/eegdb/eegdb): Fluent-design PyQt6 desktop GUI and CLI for EDF/BDF/FIF/CDT upload and download.
 
 ## Project layout
 
@@ -14,13 +14,14 @@ eegdb_client_py/
 
 | Path | Description |
 |------|-------------|
-| `app.py` | Launch PyQt6 desktop GUI |
+| `app.py` | Launch Fluent desktop GUI |
 | `eegdb_client/` | Package: GUI, CLI, TCP upload/download |
 
 ## Requirements
 
 - Python 3.10+
 - A running EEGDB server ([eegdb](https://github.com/eegdb/eegdb))
+- Desktop GUI uses [PyQt6-Fluent-Widgets](https://pypi.org/project/PyQt6-Fluent-Widgets/) (**GPLv3**). Distributing a binary that includes this library requires GPL compliance. CLI-only use of this package does not require that GUI dependency at runtime.
 
 ```bash
 python3 -m venv .venv
@@ -45,13 +46,15 @@ the Python package (`pip install -e ../eegdb-codec/python`).
 
 ## Desktop GUI
 
+Fluent side-nav app with **Connect**, **Upload**, and **Browse** pages (light/dark theme toggle in the nav footer).
+
 ```bash
 python app.py
 # or
 python -m eegdb_client
 ```
 
-Connect to your EEGDB host (default TCP port `8081`), pick a file, set study attributes, then upload or download.
+Connect to your EEGDB host (default TCP port `8081`), pick a file, set study attributes, then upload or download. Host / port / token name are remembered via `QSettings`; the API token secret is not saved.
 
 When the server has `auth.enabled: true`, fill in **Token name** and **API token** (from `eegdb -auth-token-create`).
 
