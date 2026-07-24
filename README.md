@@ -124,6 +124,30 @@ mne_epochs = epochs.to_mne()
 You can also use `EEGDBEpochs.from_server(client, ...)` with any client object
 that implements `query_epochs(...)`.
 
+## HTTP query helper
+
+Uploads and downloads use TCP. For analysis and admin reads, use
+`EEGDBQueryClient` against the EEGDB HTTP API:
+
+```python
+from eegdb_client import EEGDBQueryClient
+
+client = EEGDBQueryClient("http://localhost:8080")
+
+studies = client.list_studies()
+study = client.get_study("STUDY_ID")
+events = client.query_events("STUDY_ID", event_type="stimulus", code="target")
+quality = client.quality_scores("STUDY_ID", channels=[0, 1], range_samples=1024)
+psd = client.query_psd("STUDY_ID", channels=[0, 1], idx_start=0, idx_end=4096)
+
+job = client.submit_job(
+    "quality_scan",
+    study_id="STUDY_ID",
+    detector_options={"window_samples": 512},
+)
+status = client.get_job(job["job_id"])
+```
+
 ## Authentication
 
 EEGDB TCP uses challenge-response auth; plaintext tokens are never sent on the
