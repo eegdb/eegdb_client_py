@@ -50,10 +50,13 @@ When the server has `auth.enabled: true`, fill in **Token name** and **API token
 ```bash
 python -m eegdb_client health
 python -m eegdb_client upload recording.edf --lab mylab --paradigm resting
+python -m eegdb_client upload recording.vhdr --lab mylab --paradigm oddball
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 python -m eegdb_client download <study_id> -o out.npz -f npz --local-decode --codec lz4
 ```
+
+Upload supports EDF/BDF, FIF, and BrainVision `.vhdr` files. BrainVision markers are uploaded through the standard EEGDB event schema.
 
 Options: `--host`, `--tcp-port`, `--http-port`, `--token-name`, `--api-token`, `-v`.
 

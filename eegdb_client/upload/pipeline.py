@@ -39,7 +39,7 @@ def upload_source_file(
                 on_progress(f"Channel {ch.label}: {start}/{total}", frac)
 
     if source.events:
-        client.write_events(study_id, source.events)
+        client.write_events_json(study_id, source.events)
         if on_progress:
             on_progress("Events written", 0.92)
 

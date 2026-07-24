@@ -9,8 +9,7 @@ import sys
 
 from .download.fetcher import download_study
 from .models import StudyAttrs
-from .readers.edf_reader import read_edf
-from .readers.fif_reader import read_fif
+from .readers import read_brainvision, read_edf, read_fif
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
@@ -28,6 +27,8 @@ def _load_source(path: str):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".fif":
         return read_fif(path)
+    if ext == ".vhdr":
+        return read_brainvision(path)
     if ext in (".edf", ".bdf"):
         return read_edf(path)
     raise SystemExit(f"unsupported file type: {ext}")
