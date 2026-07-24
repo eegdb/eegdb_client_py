@@ -8,14 +8,46 @@ Set-Location $Root
 Write-Host "Installing build dependencies..."
 python -m pip install -q pyinstaller -r requirements.txt
 
+function Test-PythonImport([string]$ModuleName) {
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        python -c "import $ModuleName" *> $null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+}
+
+$CodecRoot = if ($env:EEGDB_CODEC_ROOT) {
+    $env:EEGDB_CODEC_ROOT
+} else {
+    Resolve-Path (Join-Path $Root "..\eegdb-codec") -ErrorAction SilentlyContinue
+}
+if (-not (Test-PythonImport "eegdb_codec")) {
+    if ($CodecRoot -and (Test-Path $CodecRoot)) {
+        Write-Host "Building and installing eegdb-codec from $CodecRoot"
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $CodecRoot "scripts\build-codec-wheel.ps1")
+        $wheel = Get-ChildItem (Join-Path $CodecRoot "dist\python\eegdb_codec-*.whl") | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if (-not $wheel) {
+            throw "eegdb-codec wheel was not produced under $CodecRoot\dist\python"
+        }
+        python -m pip install -q $wheel.FullName
+    } else {
+        Write-Warning "eegdb_codec is not installed and eegdb-codec was not found. Set EEGDB_CODEC_ROOT or install the wheel before packaging local decode."
+    }
+}
+
 Write-Host "Running PyInstaller..."
 pyinstaller --noconfirm --clean --windowed `
   --name EEGDBClient `
   --paths $Root `
   --hidden-import eegdb_client `
+  --hidden-import eegdb_codec `
   --hidden-import eegdb_client.cli `
   --hidden-import eegdb_client.ui.main_window `
   --hidden-import eegdb_client.ui.attrs_form `
+  --collect-binaries eegdb_codec `
   --collect-all mne `
   --collect-all PyQt6 `
   --collect-all pyedflib `

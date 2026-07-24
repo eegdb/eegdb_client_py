@@ -59,10 +59,53 @@ class ChannelDef:
 @dataclass
 class Event:
     onset: int
+    event_id: str = ""
+    type: str = ""
     duration: int = 0
     channel_id: int = 0xFFFF
     code: str = ""
     description: str = ""
+    trial_id: str = ""
+    source: str = ""
+    confidence: float = 0.0
+    attributes: Dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = {
+            "onset_us": self.onset,
+            "duration_us": self.duration,
+            "channel_id": self.channel_id,
+            "code": self.code,
+        }
+        optional = {
+            "event_id": self.event_id,
+            "type": self.type,
+            "description": self.description,
+            "trial_id": self.trial_id,
+            "source": self.source,
+            "confidence": self.confidence,
+            "attributes": self.attributes,
+        }
+        for key, value in optional.items():
+            if value:
+                out[key] = value
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Event":
+        return cls(
+            event_id=data.get("event_id", ""),
+            type=data.get("type", ""),
+            onset=int(data.get("onset_us", data.get("onset", 0))),
+            duration=int(data.get("duration_us", data.get("duration", 0))),
+            channel_id=int(data.get("channel_id", 0xFFFF)),
+            code=data.get("code", ""),
+            description=data.get("description", ""),
+            trial_id=data.get("trial_id", ""),
+            source=data.get("source", ""),
+            confidence=float(data.get("confidence", 0.0) or 0.0),
+            attributes={str(k): str(v) for k, v in (data.get("attributes") or {}).items()},
+        )
 
 
 @dataclass

@@ -429,7 +429,7 @@ def upload_edf_via_api(client: EEGDBClient, edf_data: dict,
     study = client.create_study(
         name=name,
         channels=channels,
-        attributes={"paradigm": "imported_via_api", "lab": "python_client"},
+        attributes={"paradigm": "imported_via_api", "lab": "eegdb_client_py"},
     )
     study_id = study["study_id"]
     print(f"[Upload] Study created with ID: {study_id}")

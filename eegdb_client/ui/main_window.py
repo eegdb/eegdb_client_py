@@ -168,9 +168,12 @@ class MainWindow(QMainWindow):
         self.fmt_combo.addItems(["edf", "bdf", "fif"])
         dl_btn = QPushButton("Download selected")
         dl_btn.clicked.connect(self._start_download)
+        del_btn = QPushButton("Delete selected")
+        del_btn.clicked.connect(self._delete_selected_study)
         dl_row.addWidget(QLabel("Format"))
         dl_row.addWidget(self.fmt_combo)
         dl_row.addWidget(dl_btn)
+        dl_row.addWidget(del_btn)
         layout.addLayout(dl_row)
 
         self.dl_progress = QProgressBar()
@@ -350,6 +353,20 @@ class MainWindow(QMainWindow):
         self._worker.finished_ok.connect(self._download_done)
         self._worker.failed.connect(self._download_failed)
         self._worker.start()
+
+    def _delete_selected_study(self) -> None:
+        rows = {idx.row() for idx in self.study_table.selectedIndexes()}
+        if len(rows) != 1:
+            QMessageBox.warning(self, "Delete", "Select exactly one study.")
+            return
+        row = next(iter(rows))
+        study_id = self.study_table.item(row, 0).text()
+        if QMessageBox.question(self, "Delete", f"Delete study {study_id}?") != QMessageBox.StandardButton.Yes:
+            return
+        result = self._run_tcp("Delete", lambda client: client.delete_study(study_id))
+        if result is not None:
+            self._refresh_studies()
+            QMessageBox.information(self, "Delete", f"Deleted {study_id}")
 
     def _download_done(self, saved_path: str) -> None:
         self.dl_status.setText(f"Saved: {saved_path}")

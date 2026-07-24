@@ -1,17 +1,18 @@
 # eegdb_client_py
 
-Python clients for [EEGDB](https://github.com/eegdb/eegdb): a desktop GUI/CLI client and an HTTP API demo script.
+Python clients for [EEGDB](https://github.com/eegdb/eegdb): a desktop GUI/CLI client plus HTTP and PyTorch examples.
 
 ## Project layout
 
-```
+```text
 eegdb_client_py/
-├── app.py                 # GUI entry (Run / PyInstaller)
-├── requirements.txt       # all Python dependencies
-├── eegdb_client/          # library package (UI, CLI, transport, readers)
-├── examples/
-│   └── http_api_demo.py   # standalone HTTP REST API demo
-└── scripts/               # build scripts and utilities
+|- app.py                        # GUI entry (Run / PyInstaller)
+|- requirements.txt              # all Python dependencies
+|- eegdb_client/                 # library package (UI, CLI, transport, readers)
+|- examples/
+|  |- http_api_demo.py           # standalone HTTP REST API demo
+|  `- pytorch_chunk_dataset.py   # PyTorch sliding-window dataset demo
+`- scripts/                      # build scripts and utilities
 ```
 
 | Path | Description |
@@ -19,6 +20,7 @@ eegdb_client_py/
 | `app.py` | Launch PyQt6 desktop GUI |
 | `eegdb_client/` | Package: GUI, CLI, TCP upload/download |
 | `examples/http_api_demo.py` | HTTP API demo: import EDF, query channels, rebuild EDF |
+| `examples/pytorch_chunk_dataset.py` | PyTorch sliding-window dataset example |
 
 ## Requirements
 
@@ -50,9 +52,12 @@ python -m eegdb_client health
 python -m eegdb_client upload recording.edf --lab mylab --paradigm resting
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
+python -m eegdb_client download <study_id> -o out.npz -f npz --local-decode --codec lz4
 ```
 
-Options: `--host`, `--port`, `--token-name`, `--api-token`, `-v`.
+Options: `--host`, `--tcp-port`, `--http-port`, `--token-name`, `--api-token`, `-v`.
+
+For local compressed decode, install the standalone `eegdb-codec` wheel first or let the packaging scripts build it from a sibling `../eegdb-codec` checkout.
 
 With auth enabled:
 
@@ -71,6 +76,19 @@ python examples/http_api_demo.py \
   --study-name demo-study \
   --output rebuilt.edf
 ```
+
+## PyTorch example
+
+```bash
+python examples/pytorch_chunk_dataset.py \
+  --server http://localhost:8080 \
+  --study-id STUDY_ID \
+  --channel 0 \
+  --window 512 \
+  --stride 256
+```
+
+Install `torch` separately when you need the dataset example.
 
 ## Authentication
 

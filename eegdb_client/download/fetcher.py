@@ -10,6 +10,7 @@ import numpy as np
 from ..transport.tcp_client import EEGDBTCPClient
 from .writers.edf_writer import write_edf_from_study
 from .writers.fif_writer import write_fif_from_study
+from .writers.npz_writer import write_npz_from_study
 
 ProgressCallback = Callable[[str, float], None]
 
@@ -20,6 +21,8 @@ def download_study(
     output_path: str,
     fmt: str = "edf",
     batch_size: int = 8192,
+    local_decode: bool = False,
+    codec: str = "lz4",
     on_progress: Optional[ProgressCallback] = None,
 ) -> str:
     study = client.get_study(study_id)
@@ -44,7 +47,10 @@ def download_study(
             ch_total = _probe_channel_length(client, study_id, ch_id, data_type)
         if ch_total <= 0:
             raise ValueError("cannot determine sample count for study")
-        arr = client.read_channel_all(study_id, ch_id, data_type, ch_total, batch_size)
+        if local_decode:
+            arr = client.read_channel_all_compressed(study_id, ch_id, data_type, ch_total, batch_size, codec)
+        else:
+            arr = client.read_channel_all(study_id, ch_id, data_type, ch_total, batch_size)
         channel_data[ch_id] = arr
         if total <= 0 and i == 0:
             total = len(arr)
@@ -55,6 +61,8 @@ def download_study(
     ext = fmt.lower()
     if ext == "fif":
         write_fif_from_study(output_path, study, channel_data, events)
+    elif ext == "npz":
+        write_npz_from_study(output_path, study, channel_data, events)
     else:
         write_edf_from_study(output_path, study, channel_data, events, file_type=ext)
 
