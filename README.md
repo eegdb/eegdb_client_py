@@ -57,11 +57,13 @@ python -m eegdb_client import-bids /data/bids --force
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 python -m eegdb_client download <study_id> -o out.npz -f npz --local-decode --codec lz4
+python -m eegdb_client export-bids <study_id> /data/exported-bids --subject sub-01 --task oddball
 ```
 
 Upload supports EDF/BDF, FIF, BrainVision `.vhdr`, and EEGLAB `.set` files. BrainVision and EEGLAB markers are uploaded through the standard EEGDB event schema.
 BIDS import discovers EEG files, reads `*_events.tsv`, sidecar JSON, and `participants.tsv`, then uploads each matching run as an EEGDB study.
 It writes `.eegdb_import_state.json` in the dataset root by default so interrupted imports can resume.
+BIDS export downloads a study through TCP and writes raw EEG, sidecar JSON, `channels.tsv`, `events.tsv`, and `participants.tsv`.
 
 Options: `--host`, `--tcp-port`, `--http-port`, `--token-name`, `--api-token`, `-v`.
 

@@ -8,6 +8,7 @@ import os
 import sys
 
 from .download.fetcher import download_study
+from .bids_export import export_study_to_bids
 from .models import StudyAttrs
 from .readers import find_bids_eeg_records, read_bids_eeg_record, read_brainvision, read_edf, read_eeglab, read_fif
 from .readers.bids_reader import BIDSImportState
@@ -135,6 +136,27 @@ def cmd_download(args: argparse.Namespace) -> None:
     print(path)
 
 
+def cmd_export_bids(args: argparse.Namespace) -> None:
+    def progress(msg: str, frac: float) -> None:
+        print(f"[{frac * 100:5.1f}%] {msg}")
+
+    with _tcp_client(args) as client:
+        path = export_study_to_bids(
+            client,
+            args.study_id,
+            args.output_dir,
+            subject=args.subject,
+            session=args.session,
+            task=args.task,
+            run=args.run,
+            fmt=args.format,
+            local_decode=args.local_decode,
+            codec=args.codec,
+            on_progress=progress if args.verbose else None,
+        )
+    print(path)
+
+
 def cmd_health(args: argparse.Namespace) -> None:
     with _tcp_client(args) as client:
         data = client.health()
@@ -230,6 +252,18 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_dl.add_argument("--codec", default="lz4", choices=["lz4", "zstd", "flac", "wavpack", "best"])
     p_dl.set_defaults(func=cmd_download)
+
+    p_export_bids = sub.add_parser("export-bids", help="Export a study as a BIDS EEG dataset via TCP")
+    p_export_bids.add_argument("study_id")
+    p_export_bids.add_argument("output_dir")
+    p_export_bids.add_argument("--subject", default="01", help="subject label, with or without sub- prefix")
+    p_export_bids.add_argument("--session", default="", help="session label, with or without ses- prefix")
+    p_export_bids.add_argument("--task", default="eegdb", help="task label, with or without task- prefix")
+    p_export_bids.add_argument("--run", default="", help="run label, with or without run- prefix")
+    p_export_bids.add_argument("-f", "--format", default="edf", choices=["edf", "bdf"])
+    p_export_bids.add_argument("--local-decode", action="store_true")
+    p_export_bids.add_argument("--codec", default="lz4", choices=["lz4", "zstd", "flac", "wavpack", "best"])
+    p_export_bids.set_defaults(func=cmd_export_bids)
 
     p_query = sub.add_parser("query-channel", help="Query one channel via TCP")
     p_query.add_argument("study_id")
