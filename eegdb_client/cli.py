@@ -9,7 +9,7 @@ import sys
 
 from .download.fetcher import download_study
 from .models import StudyAttrs
-from .readers import find_bids_eeg_records, read_bids_eeg_record, read_brainvision, read_edf, read_fif
+from .readers import find_bids_eeg_records, read_bids_eeg_record, read_brainvision, read_edf, read_eeglab, read_fif
 from .readers.bids_reader import BIDSImportState
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
@@ -30,6 +30,8 @@ def _load_source(path: str):
         return read_fif(path)
     if ext == ".vhdr":
         return read_brainvision(path)
+    if ext == ".set":
+        return read_eeglab(path)
     if ext in (".edf", ".bdf"):
         return read_edf(path)
     raise SystemExit(f"unsupported file type: {ext}")
@@ -187,7 +189,7 @@ def main(argv: list[str] | None = None) -> None:
     p_stats = sub.add_parser("stats", help="Show TCP + DB stats")
     p_stats.set_defaults(func=cmd_stats)
 
-    p_upload = sub.add_parser("upload", help="Upload EDF/BDF/FIF via TCP")
+    p_upload = sub.add_parser("upload", help="Upload EDF/BDF/FIF/BrainVision/EEGLAB via TCP")
     p_upload.add_argument("file")
     p_upload.add_argument("--lab", default="")
     p_upload.add_argument("--paradigm", default="")

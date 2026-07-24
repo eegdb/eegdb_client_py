@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from ..models import Event, SourceFile, StudyAttrs
-from . import read_brainvision, read_edf, read_fif
+from . import read_brainvision, read_edf, read_eeglab, read_fif
 
 
 SUPPORTED_EEG_SUFFIXES = {
@@ -19,6 +19,7 @@ SUPPORTED_EEG_SUFFIXES = {
     ".bdf",
     ".vhdr",
     ".fif",
+    ".set",
 }
 
 
@@ -165,6 +166,8 @@ def read_bids_signal_file(path: Path) -> SourceFile:
         return read_fif(str(path))
     if ext == ".vhdr":
         return read_brainvision(str(path))
+    if ext == ".set":
+        return read_eeglab(str(path))
     if ext in (".edf", ".bdf"):
         return read_edf(str(path))
     raise ValueError(f"unsupported BIDS EEG file: {path}")

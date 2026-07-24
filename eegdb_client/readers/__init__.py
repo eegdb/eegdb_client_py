@@ -22,9 +22,15 @@ def read_edf(*args, **kwargs):
     return _read_edf(*args, **kwargs)
 
 
+def read_eeglab(*args, **kwargs):
+    from .eeglab_reader import read_eeglab as _read_eeglab
+
+    return _read_eeglab(*args, **kwargs)
+
+
 def read_fif(*args, **kwargs):
     from .fif_reader import read_fif as _read_fif
 
     return _read_fif(*args, **kwargs)
 
-__all__ = ["find_bids_eeg_records", "read_bids_eeg_record", "read_brainvision", "read_edf", "read_fif"]
+__all__ = ["find_bids_eeg_records", "read_bids_eeg_record", "read_brainvision", "read_edf", "read_eeglab", "read_fif"]
