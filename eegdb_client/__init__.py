@@ -1,3 +1,7 @@
-"""EEGDB Python client — PyQt6 GUI and TCP CLI for EDF, BDF, and FIF."""
+"""EEGDB Python client: GUI, CLI, readers, transport, and analysis helpers."""
 
 __version__ = "0.1.0"
+
+from .analysis import EEGDBEpochs
+
+__all__ = ["EEGDBEpochs"]

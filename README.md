@@ -100,6 +100,27 @@ python examples/pytorch_chunk_dataset.py \
 
 Install `torch` separately when you need the dataset example.
 
+## Epochs / MNE helper
+
+```python
+from eegdb_client import EEGDBEpochs
+from eegdb_client.transport.http_client import EEGDBHTTPClient
+
+client = EEGDBHTTPClient("http://localhost:8080")
+epochs = EEGDBEpochs.from_server(
+    client,
+    "STUDY_ID",
+    channels=[0, 1],
+    event_type="stimulus",
+    code="target",
+    pre_ms=200,
+    post_ms=800,
+)
+
+avg = epochs.average()      # shape: channel x time
+mne_epochs = epochs.to_mne()
+```
+
 ## Authentication
 
 EEGDB uses challenge-response auth; **plaintext tokens are never sent on the wire**.

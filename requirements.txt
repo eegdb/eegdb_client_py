@@ -1,5 +1,6 @@
 # Dependencies for eegdb_client_py
 numpy>=1.24
+pandas>=1.5
 pyedflib>=0.1.38
 requests>=2.31
 PyQt6>=6.6

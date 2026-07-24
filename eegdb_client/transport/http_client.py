@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -51,6 +51,53 @@ class EEGDBHTTPClient:
 
     def get_study(self, study_id: str) -> Dict[str, Any]:
         resp = self._request("GET", f"/api/v1/studies/{study_id}", timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def query_epochs(
+        self,
+        study_id: str,
+        *,
+        channels: Optional[List[int]] = None,
+        event_type: str = "",
+        code: str = "",
+        trial_id: str = "",
+        source: str = "",
+        pre_ms: int,
+        post_ms: int,
+        physical: bool = True,
+        reference: Optional[List[int]] = None,
+        reject_artifact: bool = False,
+        include_artifacts: bool = False,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "pre_ms": pre_ms,
+            "post_ms": post_ms,
+            "physical": "true" if physical else "false",
+        }
+        if channels:
+            params["channels"] = ",".join(str(ch) for ch in channels)
+        if event_type:
+            params["type"] = event_type
+        if code:
+            params["code"] = code
+        if trial_id:
+            params["trial_id"] = trial_id
+        if source:
+            params["source"] = source
+        if reference:
+            params["reference"] = ",".join(str(ch) for ch in reference)
+        if reject_artifact:
+            params["reject_artifact"] = "true"
+        if include_artifacts:
+            params["include_artifacts"] = "true"
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        resp = self._request("GET", f"/api/v1/studies/{study_id}/epochs", params=params, timeout=120)
         resp.raise_for_status()
         return resp.json()
 
