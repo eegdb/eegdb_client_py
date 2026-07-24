@@ -1,4 +1,4 @@
-"""EEGDB Python client: GUI, CLI, readers, transport, and analysis helpers."""
+"""EEGDB Python client: Fluent GUI, TCP CLI, readers, and analysis helpers."""
 
 __version__ = "0.1.0"
 

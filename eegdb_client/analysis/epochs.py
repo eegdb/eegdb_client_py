@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import numpy as np
 
@@ -52,6 +55,43 @@ class EEGDBEpochs:
             reference=reference,
             reject_artifact=reject_artifact,
             include_artifacts=include_artifacts,
+        )
+        return cls.from_response(response)
+
+    @classmethod
+    def from_http(
+        cls,
+        base_url: str,
+        study_id: str,
+        *,
+        channels: Optional[List[int]] = None,
+        event_type: str = "stimulus",
+        code: str = "",
+        trial_id: str = "",
+        source: str = "",
+        pre_ms: int = 200,
+        post_ms: int = 800,
+        physical: bool = True,
+        reference: Optional[List[int]] = None,
+        reject_artifact: bool = False,
+        include_artifacts: bool = False,
+        timeout: float = 120,
+    ) -> "EEGDBEpochs":
+        response = query_epochs_http(
+            base_url,
+            study_id,
+            channels=channels,
+            event_type=event_type,
+            code=code,
+            trial_id=trial_id,
+            source=source,
+            pre_ms=pre_ms,
+            post_ms=post_ms,
+            physical=physical,
+            reference=reference,
+            reject_artifact=reject_artifact,
+            include_artifacts=include_artifacts,
+            timeout=timeout,
         )
         return cls.from_response(response)
 
@@ -137,6 +177,51 @@ def epoch_tensor(epochs: List[Dict[str, Any]], channel_ids: List[int]) -> tuple[
                 )
             data[epoch_index, ch_index, :] = samples
     return data, channel_names, units
+
+
+def query_epochs_http(
+    base_url: str,
+    study_id: str,
+    *,
+    channels: Optional[List[int]] = None,
+    event_type: str = "stimulus",
+    code: str = "",
+    trial_id: str = "",
+    source: str = "",
+    pre_ms: int = 200,
+    post_ms: int = 800,
+    physical: bool = True,
+    reference: Optional[List[int]] = None,
+    reject_artifact: bool = False,
+    include_artifacts: bool = False,
+    timeout: float = 120,
+) -> Dict[str, Any]:
+    params: Dict[str, str] = {
+        "pre_ms": str(pre_ms),
+        "post_ms": str(post_ms),
+        "physical": "true" if physical else "false",
+    }
+    if channels:
+        params["channels"] = ",".join(str(ch) for ch in channels)
+    if event_type:
+        params["type"] = event_type
+    if code:
+        params["code"] = code
+    if trial_id:
+        params["trial_id"] = trial_id
+    if source:
+        params["source"] = source
+    if reference:
+        params["reference"] = ",".join(str(ch) for ch in reference)
+    if reject_artifact:
+        params["reject_artifact"] = "true"
+    if include_artifacts:
+        params["include_artifacts"] = "true"
+
+    url = f"{base_url.rstrip('/')}/api/v1/studies/{study_id}/epochs?{urlencode(params)}"
+    req = Request(url, headers={"Accept": "application/json"})
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def channels_by_id(channels: Iterable[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:

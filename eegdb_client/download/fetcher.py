@@ -1,4 +1,4 @@
-"""TCP download pipeline: query study -> ReadBatch -> local file."""
+"""TCP download pipeline: query study -> ReadBatch / ReadCompressedBatch -> local file."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from ..codec_local import LocalCodec, parse_block_codec
 from ..transport.tcp_client import EEGDBTCPClient
 from .writers.edf_writer import write_edf_from_study
 from .writers.fif_writer import write_fif_from_study
@@ -21,14 +22,25 @@ def download_study(
     output_path: str,
     fmt: str = "edf",
     batch_size: int = 8192,
-    local_decode: bool = False,
-    codec: str = "lz4",
     on_progress: Optional[ProgressCallback] = None,
+    *,
+    local_decode: bool = False,
+    block_codec: str = "best",
 ) -> str:
+    """Download a study to a local file.
+
+    When ``local_decode`` is True, each batch uses TCP ReadCompressedBatch and is
+    decoded locally via eegdb-codec (requires the eegdb_codec package / shared lib).
+    """
     study = client.get_study(study_id)
     channels = study.get("channels", [])
     if not channels:
         raise ValueError("study has no channels")
+
+    codec = None
+    codec_id = parse_block_codec(block_codec)
+    if local_decode:
+        codec = LocalCodec()
 
     channel_data: dict[int, np.ndarray] = {}
     n = len(channels)
@@ -47,10 +59,16 @@ def download_study(
             ch_total = _probe_channel_length(client, study_id, ch_id, data_type)
         if ch_total <= 0:
             raise ValueError("cannot determine sample count for study")
-        if local_decode:
-            arr = client.read_channel_all_compressed(study_id, ch_id, data_type, ch_total, batch_size, codec)
-        else:
-            arr = client.read_channel_all(study_id, ch_id, data_type, ch_total, batch_size)
+        arr = client.read_channel_all(
+            study_id,
+            ch_id,
+            data_type,
+            ch_total,
+            batch_size,
+            local_decode=local_decode,
+            block_codec=codec_id,
+            codec=codec,
+        )
         channel_data[ch_id] = arr
         if total <= 0 and i == 0:
             total = len(arr)
@@ -59,10 +77,15 @@ def download_study(
 
     events = client.read_events(study_id)
     ext = fmt.lower()
-    if ext == "fif":
-        write_fif_from_study(output_path, study, channel_data, events)
-    elif ext == "npz":
+    if ext == "edf" and any(int(ch.get("data_type", 0)) == 0x02 for ch in channels):
+        # EDF is 16-bit; INT24 studies must be written as BDF.
+        ext = "bdf"
+        root, _ = os.path.splitext(output_path)
+        output_path = root + ".bdf"
+    if ext == "npz":
         write_npz_from_study(output_path, study, channel_data, events)
+    elif ext == "fif":
+        write_fif_from_study(output_path, study, channel_data, events)
     else:
         write_edf_from_study(output_path, study, channel_data, events, file_type=ext)
 

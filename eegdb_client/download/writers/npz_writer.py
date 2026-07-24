@@ -1,8 +1,7 @@
-"""NPZ writer for downloaded EEGDB studies."""
+"""Write downloaded study arrays to a NumPy .npz archive."""
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 import numpy as np
@@ -16,28 +15,28 @@ def write_npz_from_study(
     channel_data: Dict[int, np.ndarray],
     events: List[Event],
 ) -> None:
-    arrays: Dict[str, np.ndarray] = {}
-    labels = []
-    channel_ids = []
-    sample_rates = []
-    for ch in study.get("channels", []):
-        ch_id = int(ch["channel_id"])
-        if ch_id not in channel_data:
-            continue
-        arrays[f"ch_{ch_id}"] = np.asarray(channel_data[ch_id])
-        labels.append(ch.get("label", str(ch_id)))
-        channel_ids.append(ch_id)
-        sample_rates.append(float(ch.get("sample_rate", 0.0)))
+    channels = study.get("channels", [])
+    if not channels:
+        raise ValueError("no channels")
 
-    metadata = {
-        "study_id": study.get("study_id"),
-        "name": study.get("name"),
-        "channels": study.get("channels", []),
-        "attributes": study.get("attributes", {}),
-        "events": [e.__dict__ for e in events],
+    arrays: Dict[str, Any] = {
+        "study_id": np.asarray(study.get("study_id", "")),
+        "name": np.asarray(study.get("name", "")),
+        "channel_ids": np.asarray([int(ch["channel_id"]) for ch in channels], dtype=np.int32),
+        "labels": np.asarray([str(ch.get("label", "")) for ch in channels]),
+        "sample_rates": np.asarray([float(ch.get("sample_rate", 0.0)) for ch in channels], dtype=np.float64),
+        "data_types": np.asarray([int(ch.get("data_type", 0)) for ch in channels], dtype=np.uint8),
     }
-    arrays["channel_ids"] = np.asarray(channel_ids, dtype=np.uint16)
-    arrays["channel_labels"] = np.asarray(labels)
-    arrays["sample_rates"] = np.asarray(sample_rates, dtype=np.float64)
-    arrays["metadata_json"] = np.asarray(json.dumps(metadata, ensure_ascii=False))
+
+    for ch in channels:
+        ch_id = int(ch["channel_id"])
+        arrays[f"ch_{ch_id}"] = np.asarray(channel_data[ch_id])
+
+    if events:
+        arrays["event_onset"] = np.asarray([e.onset for e in events], dtype=np.int64)
+        arrays["event_duration"] = np.asarray([e.duration for e in events], dtype=np.int64)
+        arrays["event_channel_id"] = np.asarray([e.channel_id for e in events], dtype=np.uint16)
+        arrays["event_code"] = np.asarray([e.code for e in events])
+        arrays["event_description"] = np.asarray([e.description for e in events])
+
     np.savez_compressed(output_path, **arrays)

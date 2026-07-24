@@ -10,10 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from ..auth_proof import compute_proof
-from ..codec import EEGDBCodec
 from ..models import DT_FLOAT32, DT_FLOAT64, DT_INT16, DT_INT24, DT_INT64, Event
 
 PROTOCOL_VERSION = 2
+MAX_FRAME_SIZE = 64 << 20
 
 MSG_HANDSHAKE_REQ = 0x01
 MSG_HANDSHAKE_RESP = 0x02
@@ -23,8 +23,6 @@ MSG_WRITE_BATCH = 0x11
 MSG_CREATE_STUDY = 0x12
 MSG_WRITE_EVENTS = 0x13
 MSG_FLUSH_STUDY = 0x14
-MSG_HEARTBEAT_REQ = 0x20
-MSG_HEARTBEAT_RESP = 0x21
 MSG_ERROR = 0x30
 MSG_LIST_STUDIES_REQ = 0x40
 MSG_LIST_STUDIES_RESP = 0x41
@@ -38,29 +36,11 @@ MSG_READ_EVENTS_REQ = 0x48
 MSG_READ_EVENTS_RESP = 0x49
 MSG_READ_COMPRESSED_BATCH_REQ = 0x4A
 MSG_READ_COMPRESSED_BATCH_RESP = 0x4B
-MSG_STATS_REQ = 0x4C
-MSG_STATS_RESP = 0x4D
-MSG_DELETE_STUDY_REQ = 0x4E
-MSG_DELETE_STUDY_RESP = 0x4F
-MSG_UPDATE_STUDY_REQ = 0x50
-MSG_UPDATE_STUDY_RESP = 0x51
-MSG_QUERY_CHANNEL_REQ = 0x52
-MSG_QUERY_CHANNEL_RESP = 0x53
-MSG_WRITE_EVENTS_JSON = 0x54
-MSG_READ_EVENTS_JSON_REQ = 0x55
-MSG_READ_EVENTS_JSON_RESP = 0x56
 MSG_CLOSE = 0xFF
 
 MAX_READ_BATCH = 65536
-CONNECT_TIMEOUT = 3
-
-BLOCK_CODEC = {
-    "lz4": 0,
-    "zstd": 1,
-    "flac": 2,
-    "wavpack": 3,
-    "best": 4,
-}
+CONNECT_TIMEOUT = 10
+IO_TIMEOUT = 600
 
 
 class TCPError(RuntimeError):
@@ -85,7 +65,6 @@ class EEGDBTCPClient:
         self.token_name = token_name
         self.api_token = api_token
         self._sock: Optional[socket.socket] = None
-        self._codec: Optional[EEGDBCodec] = None
 
     @property
     def is_connected(self) -> bool:
@@ -95,6 +74,7 @@ class EEGDBTCPClient:
         self.close()
         sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(IO_TIMEOUT)
         self._sock = sock
         self._write_frame(MSG_HANDSHAKE_REQ, self._encode_handshake(self.client_name))
         msg_type, payload = self._read_frame()
@@ -139,10 +119,15 @@ class EEGDBTCPClient:
     # Upload
     # ------------------------------------------------------------------
     def create_study(
-        self, name: str, channels: List[Dict[str, Any]], attrs: Optional[Dict[str, Any]] = None
+        self,
+        name: str,
+        channels: List[Dict[str, Any]],
+        attrs: Optional[Dict[str, Any]] = None,
+        source_file: Optional[Dict[str, Any]] = None,
     ) -> str:
         ch_json = json.dumps(channels).encode("utf-8")
         attrs_json = json.dumps(attrs or {}).encode("utf-8")
+        source_json = json.dumps(source_file).encode("utf-8") if source_file else b""
         name_b = name.encode("utf-8")
         payload = (
             struct.pack("<B", len(name_b))
@@ -151,6 +136,8 @@ class EEGDBTCPClient:
             + ch_json
             + struct.pack("<I", len(attrs_json))
             + attrs_json
+            + struct.pack("<I", len(source_json))
+            + source_json
         )
         self._write_frame(MSG_CREATE_STUDY, payload)
         msg_type, resp = self._read_frame()
@@ -177,38 +164,9 @@ class EEGDBTCPClient:
         payload = struct.pack("<B", len(sid)) + sid + struct.pack("<I", len(event_bytes)) + event_bytes
         self._write_frame(MSG_WRITE_EVENTS, payload)
 
-    def write_events_json(self, study_id: str, events: List[Union[Event, Dict[str, Any]]]) -> None:
-        event_dicts = [e.to_dict() if isinstance(e, Event) else dict(e) for e in events]
-        body = json.dumps({"events": event_dicts}).encode("utf-8")
-        sid = study_id.encode("utf-8")
-        payload = struct.pack("<B", len(sid)) + sid + struct.pack("<I", len(body)) + body
-        self._write_frame(MSG_WRITE_EVENTS_JSON, payload)
-
     def flush_study(self, study_id: str) -> None:
         sid = study_id.encode("utf-8")
         self._write_frame(MSG_FLUSH_STUDY, struct.pack("<B", len(sid)) + sid)
-
-    def health(self) -> Dict[str, Any]:
-        self._write_frame(MSG_HEARTBEAT_REQ, b"")
-        msg_type, payload = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(payload)
-        if msg_type != MSG_HEARTBEAT_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return {"status": "ok", "transport": "tcp"}
-
-    def stats(self) -> Dict[str, Any]:
-        self._write_frame(MSG_STATS_REQ, b"")
-        msg_type, payload = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(payload)
-        if msg_type != MSG_STATS_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        db_json, tcp_json = self._decode_stats_response(payload)
-        return {
-            "db": json.loads(db_json) if db_json else {},
-            "tcp": json.loads(tcp_json) if tcp_json else {},
-        }
 
     # ------------------------------------------------------------------
     # Query / download
@@ -232,37 +190,6 @@ class EEGDBTCPClient:
         if msg_type != MSG_GET_STUDY_RESP:
             raise TCPError(0, f"unexpected msg {msg_type:#04x}")
         return json.loads(self._decode_json_payload(resp))
-
-    def delete_study(self, study_id: str) -> Dict[str, Any]:
-        self._write_frame(MSG_DELETE_STUDY_REQ, self._encode_delete_study_request(study_id))
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_DELETE_STUDY_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return self._decode_delete_study_response(resp)
-
-    def update_study(
-        self,
-        study_id: str,
-        name: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-        channels: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        req: Dict[str, Any] = {"study_id": study_id}
-        if name is not None:
-            req["name"] = name
-        if attributes is not None:
-            req["attributes"] = attributes
-        if channels is not None:
-            req["channels"] = channels
-        self._write_frame(MSG_UPDATE_STUDY_REQ, self._encode_update_study_request(req))
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_UPDATE_STUDY_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return self._decode_update_study_response(resp)
 
     def search_studies(self, attrs: Dict[str, str]) -> List[Dict[str, Any]]:
         attrs_json = json.dumps(attrs).encode("utf-8")
@@ -301,15 +228,20 @@ class EEGDBTCPClient:
         data_type: int,
         start_index: int,
         sample_count: int,
-        codec: str = "lz4",
-    ) -> Tuple[int, np.ndarray]:
+        block_codec: int,
+    ) -> Tuple[int, int, int, bytes]:
+        """ReadCompressedBatch (0x4A/0x4B).
+
+        Returns (start_index, sample_count, algo, compressed_payload).
+        ``block_codec`` is the Go BlockCodec id (0=lz4 … 4=best).
+        Client decodes ``compressed_payload`` with eegdb_codec using ``algo``.
+        """
         if sample_count <= 0 or sample_count > MAX_READ_BATCH:
             raise ValueError(f"sample_count must be 1..{MAX_READ_BATCH}")
-        codec_id = BLOCK_CODEC.get(codec)
-        if codec_id is None:
-            raise ValueError(f"unsupported codec {codec!r}; choose one of {sorted(BLOCK_CODEC)}")
+        if not 0 <= int(block_codec) <= 4:
+            raise ValueError(f"block_codec must be 0..4, got {block_codec}")
         payload = self._encode_read_compressed_batch_req(
-            study_id, channel_id, data_type, start_index, sample_count, codec_id
+            study_id, channel_id, data_type, start_index, sample_count, int(block_codec)
         )
         self._write_frame(MSG_READ_COMPRESSED_BATCH_REQ, payload)
         msg_type, resp = self._read_frame()
@@ -317,11 +249,8 @@ class EEGDBTCPClient:
             raise self._parse_error(resp)
         if msg_type != MSG_READ_COMPRESSED_BATCH_RESP:
             raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        start, dtype, count, algo, compressed = self._decode_read_compressed_batch_resp(resp)
-        if self._codec is None:
-            self._codec = EEGDBCodec()
-        arr = self._codec.decode(dtype, algo, count, compressed)
-        return start, arr
+        start, count, algo, compressed = self._decode_read_compressed_batch(resp)
+        return start, count, algo, compressed
 
     def read_events(self, study_id: str, filter_json: Optional[Dict[str, Any]] = None) -> List[Event]:
         fj = json.dumps(filter_json or {}).encode("utf-8")
@@ -335,61 +264,6 @@ class EEGDBTCPClient:
             raise TCPError(0, f"unexpected msg {msg_type:#04x}")
         return self._decode_events(resp)
 
-    def read_events_json(self, study_id: str, filter_json: Optional[Dict[str, Any]] = None) -> List[Event]:
-        fj = json.dumps(filter_json or {}).encode("utf-8")
-        sid = study_id.encode("utf-8")
-        payload = struct.pack("<B", len(sid)) + sid + struct.pack("<I", len(fj)) + fj
-        self._write_frame(MSG_READ_EVENTS_JSON_REQ, payload)
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_READ_EVENTS_JSON_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        data = json.loads(self._decode_json_payload(resp))
-        return [Event.from_dict(item) for item in data.get("events", [])]
-
-    def query_channel(
-        self,
-        study_id: str,
-        channel_id: int,
-        *,
-        idx_start: Optional[int] = None,
-        idx_end: Optional[int] = None,
-        start_us: Optional[int] = None,
-        end_us: Optional[int] = None,
-        physical: bool = False,
-        downsample: Optional[int] = None,
-        method: Optional[str] = None,
-        reference: Optional[List[int]] = None,
-    ) -> Dict[str, Any]:
-        req: Dict[str, Any] = {
-            "study_id": study_id,
-            "channel_id": channel_id,
-        }
-        if idx_start is not None:
-            req["idx_start"] = idx_start
-        if idx_end is not None:
-            req["idx_end"] = idx_end
-        if start_us is not None:
-            req["start_us"] = start_us
-        if end_us is not None:
-            req["end_us"] = end_us
-        if physical:
-            req["physical"] = True
-        if downsample is not None:
-            req["downsample"] = downsample
-        if method:
-            req["method"] = method
-        if reference:
-            req["reference"] = list(reference)
-        self._write_frame(MSG_QUERY_CHANNEL_REQ, self._encode_query_channel_request(req))
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_QUERY_CHANNEL_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return self._decode_query_channel_response(resp)
-
     def read_channel_all(
         self,
         study_id: str,
@@ -397,55 +271,56 @@ class EEGDBTCPClient:
         data_type: int,
         total_samples: int,
         batch_size: int = 8192,
+        *,
+        local_decode: bool = False,
+        block_codec: int = 4,
+        codec: Any = None,
     ) -> np.ndarray:
-        chunks: List[np.ndarray] = []
-        start = 0
-        while start < total_samples:
-            count = min(batch_size, total_samples - start)
-            _, arr = self.read_batch(study_id, channel_id, data_type, start, count)
-            chunks.append(arr)
-            start += count
-        if not chunks:
-            return np.array([], dtype=self._numpy_dtype(data_type))
-        return np.concatenate(chunks)
+        """Fetch a full channel.
 
-    def read_channel_all_compressed(
-        self,
-        study_id: str,
-        channel_id: int,
-        data_type: int,
-        total_samples: int,
-        batch_size: int = 8192,
-        codec: str = "lz4",
-    ) -> np.ndarray:
+        When ``local_decode`` is True, uses ReadCompressedBatch and decodes with
+        ``codec`` (eegdb_client.codec_local.LocalCodec). Otherwise uses server-side
+        ReadBatch (uncompressed samples on the wire).
+        """
         chunks: List[np.ndarray] = []
         start = 0
         while start < total_samples:
             count = min(batch_size, total_samples - start)
-            _, arr = self.read_compressed_batch(study_id, channel_id, data_type, start, count, codec)
-            chunks.append(arr)
-            start += count
+            if local_decode:
+                if codec is None:
+                    raise ValueError("local_decode requires a LocalCodec instance")
+                _, got, algo, compressed = self.read_compressed_batch(
+                    study_id, channel_id, data_type, start, count, block_codec
+                )
+                if got == 0:
+                    break
+                arr = codec.decode(data_type, algo, got, compressed)
+                chunks.append(arr)
+                start += got
+            else:
+                _, arr = self.read_batch(study_id, channel_id, data_type, start, count)
+                chunks.append(arr)
+                start += count
         if not chunks:
             return np.array([], dtype=self._numpy_dtype(data_type))
         return np.concatenate(chunks)
 
     # ------------------------------------------------------------------
-    # Wire helpers
+    # Wire helpers (protobuf envelope: [len:4 LE][version][msg_type][payload])
     # ------------------------------------------------------------------
     def _write_frame(self, msg_type: int, payload: bytes) -> None:
         if self._sock is None:
             raise RuntimeError("not connected")
-        wire = self._encode_envelope(msg_type, payload)
-        self._sock.sendall(struct.pack("<I", len(wire)) + wire)
+        envelope = self._encode_envelope(msg_type, payload)
+        self._sock.sendall(struct.pack("<I", len(envelope)) + envelope)
 
     def _read_frame(self) -> Tuple[int, bytes]:
         if self._sock is None:
             raise RuntimeError("not connected")
         frame_len = struct.unpack("<I", self._recv_exact(4))[0]
-        if frame_len <= 0:
+        if frame_len == 0 or frame_len > MAX_FRAME_SIZE:
             raise TCPError(0, f"invalid frame length {frame_len}")
-        wire = self._recv_exact(frame_len)
-        return self._decode_envelope(wire)
+        return self._decode_envelope(self._recv_exact(frame_len))
 
     def _recv_exact(self, n: int) -> bytes:
         assert self._sock is not None
@@ -458,163 +333,86 @@ class EEGDBTCPClient:
         return bytes(buf)
 
     @staticmethod
-    def _encode_handshake(client_name: str) -> bytes:
-        name = client_name.encode("utf-8")
-        return struct.pack("<BB", PROTOCOL_VERSION, len(name)) + name
-
-    @staticmethod
-    def _encode_envelope(msg_type: int, payload: bytes) -> bytes:
+    def _encode_uvarint(value: int) -> bytes:
         out = bytearray()
-        EEGDBTCPClient._append_proto_varint_field(out, 1, PROTOCOL_VERSION)
-        EEGDBTCPClient._append_proto_varint_field(out, 2, msg_type)
+        while value >= 0x80:
+            out.append((value & 0x7F) | 0x80)
+            value >>= 7
+        out.append(value & 0x7F)
+        return bytes(out)
+
+    @classmethod
+    def _encode_envelope(cls, msg_type: int, payload: bytes) -> bytes:
+        out = bytearray()
+        # field 1 = protocol version (varint)
+        out.extend(cls._encode_uvarint(1 << 3))
+        out.extend(cls._encode_uvarint(PROTOCOL_VERSION))
+        # field 2 = message type (varint)
+        out.extend(cls._encode_uvarint(2 << 3))
+        out.extend(cls._encode_uvarint(msg_type))
         if payload:
-            EEGDBTCPClient._append_proto_bytes_field(out, 4, payload)
+            # field 4 = payload (bytes)
+            out.extend(cls._encode_uvarint((4 << 3) | 2))
+            out.extend(cls._encode_uvarint(len(payload)))
+            out.extend(payload)
         return bytes(out)
 
     @staticmethod
-    def _decode_envelope(data: bytes) -> Tuple[int, bytes]:
+    def _decode_uvarint(data: bytes, off: int) -> Tuple[int, int]:
+        value = 0
+        shift = 0
+        while True:
+            if off >= len(data):
+                raise TCPError(0, "truncated protobuf varint")
+            b = data[off]
+            off += 1
+            value |= (b & 0x7F) << shift
+            if (b & 0x80) == 0:
+                return value, off
+            shift += 7
+            if shift > 63:
+                raise TCPError(0, "protobuf varint too long")
+
+    @classmethod
+    def _decode_envelope(cls, data: bytes) -> Tuple[int, bytes]:
         msg_type = 0
         payload = b""
-        index = 0
-        while index < len(data):
-            tag, consumed = EEGDBTCPClient._consume_proto_varint(data, index)
-            index += consumed
+        off = 0
+        while off < len(data):
+            tag, off = cls._decode_uvarint(data, off)
             field_num = tag >> 3
             wire_type = tag & 0x7
             if field_num in (1, 2, 3):
-                value, used = EEGDBTCPClient._consume_proto_varint(data, index)
-                index += used
+                if wire_type != 0:
+                    raise TCPError(0, f"field {field_num} invalid wire type {wire_type}")
+                value, off = cls._decode_uvarint(data, off)
                 if field_num == 2:
-                    msg_type = int(value)
+                    msg_type = value
             elif field_num == 4:
                 if wire_type != 2:
-                    raise TCPError(0, f"invalid envelope payload wire type {wire_type}")
-                payload, used = EEGDBTCPClient._consume_proto_bytes(data, index)
-                index += used
+                    raise TCPError(0, f"payload invalid wire type {wire_type}")
+                n, off = cls._decode_uvarint(data, off)
+                end = off + n
+                if end > len(data):
+                    raise TCPError(0, "truncated protobuf bytes field")
+                payload = data[off:end]
+                off = end
             else:
-                index += EEGDBTCPClient._consume_unknown_proto_field(data, index, wire_type)
+                if wire_type == 0:
+                    _, off = cls._decode_uvarint(data, off)
+                elif wire_type == 2:
+                    n, off = cls._decode_uvarint(data, off)
+                    off += n
+                else:
+                    raise TCPError(0, f"unsupported wire type {wire_type}")
         if msg_type == 0:
             raise TCPError(0, "envelope missing message type")
         return msg_type, payload
 
     @staticmethod
-    def _append_proto_varint_field(out: bytearray, field_num: int, value: int) -> None:
-        EEGDBTCPClient._append_proto_uvarint(out, field_num << 3)
-        EEGDBTCPClient._append_proto_uvarint(out, value)
-
-    @staticmethod
-    def _append_proto_svarint_field(out: bytearray, field_num: int, value: int) -> None:
-        EEGDBTCPClient._append_proto_uvarint(out, field_num << 3)
-        EEGDBTCPClient._append_proto_uvarint(out, EEGDBTCPClient._zigzag_encode(value))
-
-    @staticmethod
-    def _append_proto_bool_field(out: bytearray, field_num: int, value: bool) -> None:
-        EEGDBTCPClient._append_proto_varint_field(out, field_num, 1 if value else 0)
-
-    @staticmethod
-    def _append_proto_bytes_field(out: bytearray, field_num: int, value: bytes) -> None:
-        EEGDBTCPClient._append_proto_uvarint(out, (field_num << 3) | 2)
-        EEGDBTCPClient._append_proto_uvarint(out, len(value))
-        out.extend(value)
-
-    @staticmethod
-    def _append_proto_string_field(out: bytearray, field_num: int, value: str) -> None:
-        EEGDBTCPClient._append_proto_bytes_field(out, field_num, value.encode("utf-8"))
-
-    @staticmethod
-    def _append_proto_fixed32_field(out: bytearray, field_num: int, value: int) -> None:
-        EEGDBTCPClient._append_proto_uvarint(out, (field_num << 3) | 5)
-        out.extend(struct.pack("<I", value))
-
-    @staticmethod
-    def _append_proto_fixed64_field(out: bytearray, field_num: int, value: int) -> None:
-        EEGDBTCPClient._append_proto_uvarint(out, (field_num << 3) | 1)
-        out.extend(struct.pack("<Q", value))
-
-    @staticmethod
-    def _append_proto_uvarint(out: bytearray, value: int) -> None:
-        while value >= 0x80:
-            out.append((value & 0x7F) | 0x80)
-            value >>= 7
-        out.append(value & 0x7F)
-
-    @staticmethod
-    def _consume_proto_varint(data: bytes, start: int) -> Tuple[int, int]:
-        value = 0
-        shift = 0
-        index = start
-        while index < len(data) and shift < 70:
-            b = data[index]
-            index += 1
-            value |= (b & 0x7F) << shift
-            if b < 0x80:
-                return value, index - start
-            shift += 7
-        raise TCPError(0, "invalid protobuf varint")
-
-    @staticmethod
-    def _consume_proto_bytes(data: bytes, start: int) -> Tuple[bytes, int]:
-        size, consumed = EEGDBTCPClient._consume_proto_varint(data, start)
-        value_start = start + consumed
-        value_end = value_start + size
-        if value_end > len(data):
-            raise TCPError(0, "truncated protobuf bytes field")
-        return data[value_start:value_end], consumed + size
-
-    @staticmethod
-    def _consume_proto_string(data: bytes, start: int) -> Tuple[str, int]:
-        value, consumed = EEGDBTCPClient._consume_proto_bytes(data, start)
-        return value.decode("utf-8"), consumed
-
-    @staticmethod
-    def _consume_proto_bool(data: bytes, start: int) -> Tuple[bool, int]:
-        value, consumed = EEGDBTCPClient._consume_proto_varint(data, start)
-        return value != 0, consumed
-
-    @staticmethod
-    def _consume_proto_svarint(data: bytes, start: int) -> Tuple[int, int]:
-        value, consumed = EEGDBTCPClient._consume_proto_varint(data, start)
-        return EEGDBTCPClient._zigzag_decode(value), consumed
-
-    @staticmethod
-    def _consume_proto_fixed32(data: bytes, start: int) -> Tuple[int, int]:
-        end = start + 4
-        if end > len(data):
-            raise TCPError(0, "truncated protobuf fixed32 field")
-        return struct.unpack("<I", data[start:end])[0], 4
-
-    @staticmethod
-    def _consume_proto_fixed64(data: bytes, start: int) -> Tuple[int, int]:
-        end = start + 8
-        if end > len(data):
-            raise TCPError(0, "truncated protobuf fixed64 field")
-        return struct.unpack("<Q", data[start:end])[0], 8
-
-    @staticmethod
-    def _consume_unknown_proto_field(data: bytes, start: int, wire_type: int) -> int:
-        if wire_type == 0:
-            _, consumed = EEGDBTCPClient._consume_proto_varint(data, start)
-            return consumed
-        if wire_type == 1:
-            if start + 8 > len(data):
-                raise TCPError(0, "truncated protobuf fixed64 field")
-            return 8
-        if wire_type == 2:
-            _, consumed = EEGDBTCPClient._consume_proto_bytes(data, start)
-            return consumed
-        if wire_type == 5:
-            if start + 4 > len(data):
-                raise TCPError(0, "truncated protobuf fixed32 field")
-            return 4
-        raise TCPError(0, f"unsupported protobuf wire type {wire_type}")
-
-    @staticmethod
-    def _zigzag_encode(value: int) -> int:
-        return (value << 1) ^ (value >> 63)
-
-    @staticmethod
-    def _zigzag_decode(value: int) -> int:
-        return (value >> 1) ^ -(value & 1)
+    def _encode_handshake(client_name: str) -> bytes:
+        name = client_name.encode("utf-8")
+        return struct.pack("<BB", PROTOCOL_VERSION, len(name)) + name
 
     @staticmethod
     def _decode_handshake_resp(payload: bytes) -> Tuple[int, str, bytes]:
@@ -637,198 +435,6 @@ class EEGDBTCPClient:
     def _encode_study_id(study_id: str) -> bytes:
         sid = study_id.encode("utf-8")
         return struct.pack("<B", len(sid)) + sid
-
-    @staticmethod
-    def _encode_delete_study_request(study_id: str) -> bytes:
-        out = bytearray()
-        EEGDBTCPClient._append_proto_string_field(out, 1, study_id)
-        return bytes(out)
-
-    @staticmethod
-    def _decode_delete_study_response(data: bytes) -> Dict[str, Any]:
-        out: Dict[str, Any] = {}
-        index = 0
-        while index < len(data):
-            tag, consumed = EEGDBTCPClient._consume_proto_varint(data, index)
-            index += consumed
-            field_num = tag >> 3
-            wire_type = tag & 0x7
-            if field_num == 1:
-                value, used = EEGDBTCPClient._consume_proto_string(data, index)
-                out["status"] = value
-                index += used
-            elif field_num == 2:
-                value, used = EEGDBTCPClient._consume_proto_string(data, index)
-                out["study_id"] = value
-                index += used
-            else:
-                index += EEGDBTCPClient._consume_unknown_proto_field(data, index, wire_type)
-        return out
-
-    @staticmethod
-    def _decode_stats_response(data: bytes) -> Tuple[bytes, bytes]:
-        db_json = b""
-        tcp_json = b""
-        index = 0
-        while index < len(data):
-            tag, consumed = EEGDBTCPClient._consume_proto_varint(data, index)
-            index += consumed
-            field_num = tag >> 3
-            wire_type = tag & 0x7
-            if field_num == 1:
-                db_json, used = EEGDBTCPClient._consume_proto_bytes(data, index)
-                index += used
-            elif field_num == 2:
-                tcp_json, used = EEGDBTCPClient._consume_proto_bytes(data, index)
-                index += used
-            else:
-                index += EEGDBTCPClient._consume_unknown_proto_field(data, index, wire_type)
-        return db_json, tcp_json
-
-    @staticmethod
-    def _encode_update_study_request(req: Dict[str, Any]) -> bytes:
-        out = bytearray()
-        EEGDBTCPClient._append_proto_string_field(out, 1, req["study_id"])
-        if "name" in req:
-            EEGDBTCPClient._append_proto_string_field(out, 2, req["name"])
-            EEGDBTCPClient._append_proto_bool_field(out, 3, True)
-        attrs = req.get("attributes")
-        if attrs:
-            for key in sorted(attrs):
-                entry = bytearray()
-                EEGDBTCPClient._append_proto_string_field(entry, 1, str(key))
-                EEGDBTCPClient._append_proto_string_field(entry, 2, str(attrs[key]))
-                EEGDBTCPClient._append_proto_bytes_field(out, 4, bytes(entry))
-        channels = req.get("channels")
-        if channels is not None:
-            EEGDBTCPClient._append_proto_bytes_field(out, 5, json.dumps(channels).encode("utf-8"))
-        return bytes(out)
-
-    @staticmethod
-    def _decode_update_study_response(data: bytes) -> Dict[str, Any]:
-        study_json = b""
-        index = 0
-        while index < len(data):
-            tag, consumed = EEGDBTCPClient._consume_proto_varint(data, index)
-            index += consumed
-            field_num = tag >> 3
-            wire_type = tag & 0x7
-            if field_num == 1:
-                study_json, used = EEGDBTCPClient._consume_proto_bytes(data, index)
-                index += used
-            else:
-                index += EEGDBTCPClient._consume_unknown_proto_field(data, index, wire_type)
-        return json.loads(study_json) if study_json else {}
-
-    @staticmethod
-    def _encode_query_channel_request(req: Dict[str, Any]) -> bytes:
-        out = bytearray()
-        EEGDBTCPClient._append_proto_string_field(out, 1, req["study_id"])
-        EEGDBTCPClient._append_proto_varint_field(out, 2, int(req["channel_id"]))
-        if "start_us" in req:
-            EEGDBTCPClient._append_proto_svarint_field(out, 3, int(req["start_us"]))
-            EEGDBTCPClient._append_proto_bool_field(out, 4, True)
-        if "end_us" in req:
-            EEGDBTCPClient._append_proto_svarint_field(out, 5, int(req["end_us"]))
-            EEGDBTCPClient._append_proto_bool_field(out, 6, True)
-        if "idx_start" in req:
-            EEGDBTCPClient._append_proto_varint_field(out, 7, int(req["idx_start"]))
-            EEGDBTCPClient._append_proto_bool_field(out, 8, True)
-        if "idx_end" in req:
-            EEGDBTCPClient._append_proto_varint_field(out, 9, int(req["idx_end"]))
-            EEGDBTCPClient._append_proto_bool_field(out, 10, True)
-        if req.get("physical"):
-            EEGDBTCPClient._append_proto_bool_field(out, 11, True)
-        if "downsample" in req:
-            EEGDBTCPClient._append_proto_svarint_field(out, 12, int(req["downsample"]))
-            EEGDBTCPClient._append_proto_bool_field(out, 13, True)
-        if req.get("method"):
-            EEGDBTCPClient._append_proto_string_field(out, 14, req["method"])
-        for ref in req.get("reference", []):
-            EEGDBTCPClient._append_proto_varint_field(out, 15, int(ref))
-        return bytes(out)
-
-    @staticmethod
-    def _decode_query_channel_response(data: bytes) -> Dict[str, Any]:
-        out: Dict[str, Any] = {
-            "study_id": "",
-            "channel_id": 0,
-            "sample_count": 0,
-            "data_type": "",
-        }
-        int16_samples: List[int] = []
-        int24_samples: List[int] = []
-        float32_samples: List[float] = []
-        float64_samples: List[float] = []
-        int64_samples: List[int] = []
-        index = 0
-        while index < len(data):
-            tag, consumed = EEGDBTCPClient._consume_proto_varint(data, index)
-            index += consumed
-            field_num = tag >> 3
-            wire_type = tag & 0x7
-            if field_num == 1:
-                out["study_id"], used = EEGDBTCPClient._consume_proto_string(data, index)
-                index += used
-            elif field_num == 2:
-                out["channel_id"], used = EEGDBTCPClient._consume_proto_varint(data, index)
-                index += used
-            elif field_num == 3:
-                out["sample_count"], used = EEGDBTCPClient._consume_proto_varint(data, index)
-                index += used
-            elif field_num == 4:
-                out["data_type"], used = EEGDBTCPClient._consume_proto_string(data, index)
-                index += used
-            elif field_num == 5:
-                out["unit"], used = EEGDBTCPClient._consume_proto_string(data, index)
-                index += used
-            elif field_num == 6:
-                value, used = EEGDBTCPClient._consume_proto_varint(data, index)
-                out.setdefault("references", []).append(value)
-                index += used
-            elif field_num == 7:
-                out["downsample_factor"], used = EEGDBTCPClient._consume_proto_varint(data, index)
-                index += used
-            elif field_num == 8:
-                bits, used = EEGDBTCPClient._consume_proto_fixed64(data, index)
-                out["effective_sample_rate"] = struct.unpack("<d", struct.pack("<Q", bits))[0]
-                index += used
-            elif field_num == 9:
-                value, used = EEGDBTCPClient._consume_proto_svarint(data, index)
-                int16_samples.append(value)
-                index += used
-            elif field_num == 10:
-                value, used = EEGDBTCPClient._consume_proto_svarint(data, index)
-                int24_samples.append(value)
-                index += used
-            elif field_num == 11:
-                bits, used = EEGDBTCPClient._consume_proto_fixed32(data, index)
-                float32_samples.append(struct.unpack("<f", struct.pack("<I", bits))[0])
-                index += used
-            elif field_num == 12:
-                bits, used = EEGDBTCPClient._consume_proto_fixed64(data, index)
-                float64_samples.append(struct.unpack("<d", struct.pack("<Q", bits))[0])
-                index += used
-            elif field_num == 13:
-                value, used = EEGDBTCPClient._consume_proto_svarint(data, index)
-                int64_samples.append(value)
-                index += used
-            else:
-                index += EEGDBTCPClient._consume_unknown_proto_field(data, index, wire_type)
-        data_type = out.get("data_type")
-        if data_type == "int16":
-            out["samples"] = int16_samples
-        elif data_type == "int24":
-            out["samples"] = int24_samples
-        elif data_type == "float32":
-            out["samples"] = float32_samples
-        elif data_type in ("float64", "physical", "rereferenced"):
-            out["samples"] = float64_samples
-        elif data_type == "int64":
-            out["samples"] = int64_samples
-        else:
-            out["samples"] = []
-        return out
 
     @staticmethod
     def _encode_json_payload(data: bytes) -> bytes:
@@ -900,14 +506,19 @@ class EEGDBTCPClient:
 
     @staticmethod
     def _encode_read_compressed_batch_req(
-        study_id: str, channel_id: int, data_type: int, start_index: int, sample_count: int, codec_id: int
+        study_id: str,
+        channel_id: int,
+        data_type: int,
+        start_index: int,
+        sample_count: int,
+        block_codec: int,
     ) -> bytes:
         sid = study_id.encode("utf-8")
         return (
             struct.pack("<B", len(sid))
             + sid
             + struct.pack("<HBQ", channel_id, data_type, start_index)
-            + struct.pack("<IB", sample_count, codec_id)
+            + struct.pack("<IB", sample_count, block_codec & 0xFF)
         )
 
     def _decode_write_batch(self, data: bytes) -> Tuple[int, np.ndarray]:
@@ -924,11 +535,16 @@ class EEGDBTCPClient:
         return start_index, arr.copy()
 
     @staticmethod
-    def _decode_read_compressed_batch_resp(data: bytes) -> Tuple[int, int, int, int, bytes]:
-        off = 0
-        id_len = data[off]
-        off += 1 + id_len
-        _channel_id, data_type, start_index = struct.unpack_from("<HBQ", data, off)
+    def _decode_read_compressed_batch(data: bytes) -> Tuple[int, int, int, bytes]:
+        """Returns (start_index, sample_count, algo, compressed_payload)."""
+        if len(data) < 1 + 2 + 1 + 8 + 4 + 1 + 4:
+            raise TCPError(0, "read compressed batch resp too short")
+        id_len = data[0]
+        off = 1 + id_len
+        if off + 2 + 1 + 8 + 4 + 1 + 4 > len(data):
+            raise TCPError(0, "truncated read compressed batch resp header")
+        # channel_id, data_type unused by caller but present on wire
+        _channel_id, _data_type, start_index = struct.unpack_from("<HBQ", data, off)
         off += 11
         sample_count = struct.unpack_from("<I", data, off)[0]
         off += 4
@@ -936,8 +552,9 @@ class EEGDBTCPClient:
         off += 1
         payload_len = struct.unpack_from("<I", data, off)[0]
         off += 4
-        payload = data[off : off + payload_len]
-        return start_index, data_type, sample_count, algo, payload
+        if payload_len < 0 or off + payload_len > len(data):
+            raise TCPError(0, "truncated compressed payload")
+        return start_index, sample_count, algo, data[off : off + payload_len]
 
     @staticmethod
     def _encode_events(events: List[Event]) -> bytes:
