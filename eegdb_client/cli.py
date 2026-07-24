@@ -9,7 +9,7 @@ import sys
 
 from .download.fetcher import download_study
 from .models import StudyAttrs
-from .readers import read_brainvision, read_edf, read_fif
+from .readers import find_bids_eeg_records, read_bids_eeg_record, read_brainvision, read_edf, read_fif
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
@@ -54,6 +54,46 @@ def cmd_upload(args: argparse.Namespace) -> None:
             on_progress=progress if args.verbose else None,
         )
     print(study_id)
+
+
+def cmd_import_bids(args: argparse.Namespace) -> None:
+    records = find_bids_eeg_records(
+        args.dataset,
+        subject=args.subject,
+        session=args.session,
+        task=args.task,
+        run=args.run,
+    )
+    if not records:
+        raise SystemExit("no matching BIDS EEG files found")
+
+    uploaded: list[str] = []
+
+    def progress(msg: str, frac: float) -> None:
+        print(f"[{frac * 100:5.1f}%] {msg}")
+
+    with _tcp_client(args) as client:
+        for idx, record in enumerate(records, start=1):
+            bids_source = read_bids_eeg_record(record)
+            attrs = bids_source.attrs
+            if args.lab:
+                attrs.lab = args.lab
+            if args.device:
+                attrs.device_type = args.device
+            if args.paradigm:
+                attrs.paradigm = args.paradigm
+            study_id = upload_source_file(
+                client,
+                bids_source.source,
+                attrs,
+                batch_seconds=args.batch_seconds,
+                on_progress=progress if args.verbose else None,
+            )
+            uploaded.append(study_id)
+            if args.verbose:
+                print(f"uploaded {idx}/{len(records)} {record.path} -> {study_id}")
+
+    print(json.dumps({"count": len(uploaded), "study_ids": uploaded}, ensure_ascii=False))
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -144,6 +184,18 @@ def main(argv: list[str] | None = None) -> None:
     p_upload.add_argument("--device", default="")
     p_upload.add_argument("--batch-seconds", type=float, default=1.0)
     p_upload.set_defaults(func=cmd_upload)
+
+    p_bids = sub.add_parser("import-bids", help="Import BIDS EEG dataset via TCP")
+    p_bids.add_argument("dataset")
+    p_bids.add_argument("--subject", default="", help="subject label, with or without sub- prefix")
+    p_bids.add_argument("--session", default="", help="session label, with or without ses- prefix")
+    p_bids.add_argument("--task", default="", help="task label, with or without task- prefix")
+    p_bids.add_argument("--run", default="", help="run label, with or without run- prefix")
+    p_bids.add_argument("--lab", default="")
+    p_bids.add_argument("--paradigm", default="")
+    p_bids.add_argument("--device", default="")
+    p_bids.add_argument("--batch-seconds", type=float, default=1.0)
+    p_bids.set_defaults(func=cmd_import_bids)
 
     p_list = sub.add_parser("list", help="List studies via TCP")
     p_list.set_defaults(func=cmd_list)
