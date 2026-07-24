@@ -10,6 +10,7 @@ import sys
 from .download.fetcher import download_study
 from .models import StudyAttrs
 from .readers import find_bids_eeg_records, read_bids_eeg_record, read_brainvision, read_edf, read_fif
+from .readers.bids_reader import BIDSImportState
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
@@ -68,12 +69,19 @@ def cmd_import_bids(args: argparse.Namespace) -> None:
         raise SystemExit("no matching BIDS EEG files found")
 
     uploaded: list[str] = []
+    skipped: list[str] = []
+    state = None if args.no_resume else BIDSImportState.load(args.dataset, args.state_file)
 
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
     with _tcp_client(args) as client:
         for idx, record in enumerate(records, start=1):
+            if state is not None and not args.force and state.is_done(record):
+                skipped.append(str(record.path))
+                if args.verbose:
+                    print(f"skipped {idx}/{len(records)} {record.path}")
+                continue
             bids_source = read_bids_eeg_record(record)
             attrs = bids_source.attrs
             if args.lab:
@@ -90,10 +98,12 @@ def cmd_import_bids(args: argparse.Namespace) -> None:
                 on_progress=progress if args.verbose else None,
             )
             uploaded.append(study_id)
+            if state is not None:
+                state.mark_done(record, study_id)
             if args.verbose:
                 print(f"uploaded {idx}/{len(records)} {record.path} -> {study_id}")
 
-    print(json.dumps({"count": len(uploaded), "study_ids": uploaded}, ensure_ascii=False))
+    print(json.dumps({"count": len(uploaded), "study_ids": uploaded, "skipped": len(skipped)}, ensure_ascii=False))
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -195,6 +205,9 @@ def main(argv: list[str] | None = None) -> None:
     p_bids.add_argument("--paradigm", default="")
     p_bids.add_argument("--device", default="")
     p_bids.add_argument("--batch-seconds", type=float, default=1.0)
+    p_bids.add_argument("--state-file", default=".eegdb_import_state.json", help="checkpoint file path, relative to dataset by default")
+    p_bids.add_argument("--force", action="store_true", help="upload matching runs even if checkpoint marks them done")
+    p_bids.add_argument("--no-resume", action="store_true", help="disable checkpoint/resume")
     p_bids.set_defaults(func=cmd_import_bids)
 
     p_list = sub.add_parser("list", help="List studies via TCP")

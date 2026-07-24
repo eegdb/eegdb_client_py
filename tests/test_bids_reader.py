@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from eegdb_client.readers.bids_reader import (
+    BIDSImportState,
     find_bids_eeg_records,
     parse_bids_entities,
     read_bids_events,
@@ -53,3 +54,22 @@ def test_read_bids_events(tmp_path: Path):
     assert events[1].attributes["correct"] == "true"
     assert events[2].type == "artifact"
     assert events[2].duration == 500_000
+
+
+def test_bids_import_state_tracks_done_records(tmp_path: Path):
+    eeg_dir = tmp_path / "sub-01" / "eeg"
+    eeg_dir.mkdir(parents=True)
+    data = eeg_dir / "sub-01_task-rest_eeg.vhdr"
+    data.write_text("header", encoding="utf-8")
+    records = find_bids_eeg_records(tmp_path)
+    assert len(records) == 1
+
+    state = BIDSImportState.load(tmp_path)
+    assert not state.is_done(records[0])
+
+    state.mark_done(records[0], "study-1")
+    reloaded = BIDSImportState.load(tmp_path)
+    assert reloaded.is_done(records[0])
+
+    data.write_text("changed", encoding="utf-8")
+    assert not reloaded.is_done(records[0])

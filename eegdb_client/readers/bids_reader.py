@@ -38,6 +38,69 @@ class BIDSSource:
     entities: Dict[str, str]
 
 
+DEFAULT_BIDS_STATE_FILE = ".eegdb_import_state.json"
+
+
+@dataclass
+class BIDSImportState:
+    root: Path
+    path: Path
+    records: Dict[str, Dict[str, object]]
+
+    @classmethod
+    def load(cls, root: str | Path, state_file: str = DEFAULT_BIDS_STATE_FILE) -> "BIDSImportState":
+        root_path = Path(root)
+        path = Path(state_file)
+        if not path.is_absolute():
+            path = root_path / path
+        if not path.exists():
+            return cls(root=root_path, path=path, records={})
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return cls(root=root_path, path=path, records=dict(data.get("records", {})))
+
+    def is_done(self, record: BIDSEEGRecord) -> bool:
+        key = self.key(record.path)
+        stored = self.records.get(key)
+        if not stored:
+            return False
+        fp = file_fingerprint(record.path)
+        return (
+            stored.get("status") == "done"
+            and stored.get("size") == fp["size"]
+            and stored.get("mtime_ns") == fp["mtime_ns"]
+            and bool(stored.get("study_id"))
+        )
+
+    def mark_done(self, record: BIDSEEGRecord, study_id: str) -> None:
+        key = self.key(record.path)
+        fp = file_fingerprint(record.path)
+        self.records[key] = {
+            "status": "done",
+            "study_id": study_id,
+            "size": fp["size"],
+            "mtime_ns": fp["mtime_ns"],
+            "entities": dict(record.entities),
+        }
+        self.save()
+
+    def key(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            return path.resolve().as_posix()
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "records": self.records,
+        }
+        with self.path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
+            fh.write("\n")
+
+
 def find_bids_eeg_records(
     root: str | Path,
     *,
@@ -77,6 +140,11 @@ def find_bids_eeg_records(
         )
         _ = base
     return records
+
+
+def file_fingerprint(path: Path) -> Dict[str, int]:
+    stat = path.stat()
+    return {"size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)}
 
 
 def read_bids_eeg_record(record: BIDSEEGRecord) -> BIDSSource:
