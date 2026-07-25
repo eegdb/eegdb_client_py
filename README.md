@@ -18,7 +18,8 @@ eegdb_client_py/
 |------|-------------|
 | `app.py` | Launch Fluent desktop GUI |
 | `eegdb_client/cli.py` | Command-line entry for health, upload, list, download |
-| `eegdb_client/transport/tcp_client.py` | EEGDB TCP protocol client |
+| `eegdb_client/transport/tcp_client.py` | EEGDB EDB/Protobuf v1 TCP client |
+| `eegdb_client/protocol/v1/protocol_pb2.py` | Generated TCP schema binding; do not edit by hand |
 | `eegdb_client/readers/` | File readers for EDF/BDF/FIF/Curry |
 | `eegdb_client/analysis/` | Epoch response container and MNE conversion helpers |
 

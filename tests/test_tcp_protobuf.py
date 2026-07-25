@@ -58,11 +58,9 @@ class ProtobufFrameTests(unittest.TestCase):
 
     def test_go_golden_frames_are_byte_identical(self) -> None:
         fixture_path = (
-            Path(__file__).resolve().parents[2]
-            / "EEGDB"
-            / "testdata"
-            / "tcp_protobuf_v1"
-            / "frames.json"
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "tcp_protobuf_v1_frames.json"
         )
         fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
         self.assertEqual(fixtures["protocol_version"], PROTOCOL_VERSION)
