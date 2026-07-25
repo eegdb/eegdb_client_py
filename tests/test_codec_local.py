@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 import unittest
 
 from eegdb_client.codec_local import (
@@ -13,7 +12,7 @@ from eegdb_client.codec_local import (
     BLOCK_CODEC_ZSTD,
     parse_block_codec,
 )
-from eegdb_client.transport.tcp_client import EEGDBTCPClient
+from eegdb_client.protocol.v1 import protocol_pb2 as protocol
 
 
 class BlockCodecParseTests(unittest.TestCase):
@@ -31,37 +30,37 @@ class BlockCodecParseTests(unittest.TestCase):
 
 
 class CompressedBatchWireTests(unittest.TestCase):
-    def test_encode_req(self) -> None:
-        raw = EEGDBTCPClient._encode_read_compressed_batch_req(
-            "abc", 7, 0x01, 100, 64, BLOCK_CODEC_ZSTD
+    def test_request_uses_generated_type_and_maps_codec_enum(self) -> None:
+        request = protocol.ReadCompressedBatchRequest(
+            study_id="abc",
+            channel_id=7,
+            data_type=protocol.DATA_TYPE_INT16,
+            start_index=100,
+            sample_count=64,
+            block_codec=BLOCK_CODEC_ZSTD + 1,
         )
-        self.assertEqual(raw[0], 3)
-        self.assertEqual(raw[1:4], b"abc")
-        channel_id, data_type, start = struct.unpack_from("<HBQ", raw, 4)
-        self.assertEqual(channel_id, 7)
-        self.assertEqual(data_type, 0x01)
-        self.assertEqual(start, 100)
-        count, codec = struct.unpack_from("<IB", raw, 4 + 11)
-        self.assertEqual(count, 64)
-        self.assertEqual(codec, BLOCK_CODEC_ZSTD)
+        self.assertEqual(request.study_id, "abc")
+        self.assertEqual(request.channel_id, 7)
+        self.assertEqual(request.data_type, protocol.DATA_TYPE_INT16)
+        self.assertEqual(request.start_index, 100)
+        self.assertEqual(request.sample_count, 64)
+        self.assertEqual(request.block_codec, protocol.BLOCK_CODEC_ZSTD)
 
-    def test_decode_resp(self) -> None:
-        sid = b"s1"
+    def test_generated_response_exposes_compressed_payload(self) -> None:
         payload = b"\x01\x02\x03\x04"
-        body = (
-            struct.pack("<B", len(sid))
-            + sid
-            + struct.pack("<HBQ", 1, 0x01, 10)
-            + struct.pack("<I", 4)
-            + struct.pack("<B", 0x11)  # algo zstd
-            + struct.pack("<I", len(payload))
-            + payload
+        response = protocol.ReadCompressedBatchResponse(
+            study_id="s1",
+            channel_id=1,
+            data_type=protocol.DATA_TYPE_INT16,
+            start_index=10,
+            sample_count=4,
+            compression_algorithm=0x11,
+            compressed_data=payload,
         )
-        start, count, algo, compressed = EEGDBTCPClient._decode_read_compressed_batch(body)
-        self.assertEqual(start, 10)
-        self.assertEqual(count, 4)
-        self.assertEqual(algo, 0x11)
-        self.assertEqual(compressed, payload)
+        self.assertEqual(response.start_index, 10)
+        self.assertEqual(response.sample_count, 4)
+        self.assertEqual(response.compression_algorithm, 0x11)
+        self.assertEqual(response.compressed_data, payload)
 
 
 if __name__ == "__main__":

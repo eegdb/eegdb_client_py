@@ -6,6 +6,7 @@ PyQt6>=6.6
 PyQt6-Fluent-Widgets>=1.11.0
 mne>=1.6
 curryreader>=0.1.0
+protobuf>=6.31.1,<7
 
 # Optional: local compressed download decode (--local-decode)
 # Build from sibling eegdb-codec repo:

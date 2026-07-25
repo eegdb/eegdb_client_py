@@ -1,8 +1,7 @@
-"""Binary TCP client for EEGDB upload and query/download."""
+"""EEGDB Protobuf v1 TCP client using the recoverable EDB frame."""
 
 from __future__ import annotations
 
-import json
 import socket
 import struct
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -11,43 +10,22 @@ import numpy as np
 
 from ..auth_proof import compute_proof
 from ..models import DT_FLOAT32, DT_FLOAT64, DT_INT16, DT_INT24, DT_INT64, Event
+from ..protocol.v1 import protocol_pb2 as protocol
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 1
+FRAME_MAGIC = b"EDB"
 MAX_FRAME_SIZE = 64 << 20
-
-MSG_HANDSHAKE_REQ = 0x01
-MSG_HANDSHAKE_RESP = 0x02
-MSG_AUTH_PROOF = 0x03
-MSG_AUTH_RESP = 0x04
-MSG_WRITE_BATCH = 0x11
-MSG_CREATE_STUDY = 0x12
-MSG_WRITE_EVENTS = 0x13
-MSG_FLUSH_STUDY = 0x14
-MSG_ERROR = 0x30
-MSG_LIST_STUDIES_REQ = 0x40
-MSG_LIST_STUDIES_RESP = 0x41
-MSG_GET_STUDY_REQ = 0x42
-MSG_GET_STUDY_RESP = 0x43
-MSG_SEARCH_STUDIES_REQ = 0x44
-MSG_SEARCH_STUDIES_RESP = 0x45
-MSG_READ_BATCH_REQ = 0x46
-MSG_READ_BATCH_RESP = 0x47
-MSG_READ_EVENTS_REQ = 0x48
-MSG_READ_EVENTS_RESP = 0x49
-MSG_READ_COMPRESSED_BATCH_REQ = 0x4A
-MSG_READ_COMPRESSED_BATCH_RESP = 0x4B
-MSG_CLOSE = 0xFF
-
 MAX_READ_BATCH = 65536
 CONNECT_TIMEOUT = 10
 IO_TIMEOUT = 600
 
 
 class TCPError(RuntimeError):
-    def __init__(self, code: int, message: str):
-        super().__init__(f"TCP error {code:#04x}: {message}")
+    def __init__(self, code: int, message: str, retryable: bool = False):
+        super().__init__(f"TCP error {code}: {message}")
         self.code = code
         self.message = message
+        self.retryable = retryable
 
 
 class EEGDBTCPClient:
@@ -65,6 +43,7 @@ class EEGDBTCPClient:
         self.token_name = token_name
         self.api_token = api_token
         self._sock: Optional[socket.socket] = None
+        self._next_request_id = 1
 
     @property
     def is_connected(self) -> bool:
@@ -76,37 +55,46 @@ class EEGDBTCPClient:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         sock.settimeout(IO_TIMEOUT)
         self._sock = sock
-        self._write_frame(MSG_HANDSHAKE_REQ, self._encode_handshake(self.client_name))
-        msg_type, payload = self._read_frame()
-        if msg_type != MSG_HANDSHAKE_RESP:
-            raise TCPError(0, f"expected handshake resp, got {msg_type:#04x}")
-        status, _, nonce = self._decode_handshake_resp(payload)
-        if status != 0:
-            raise TCPError(status, "handshake failed")
-        if nonce:
-            if not self.api_token or not self.token_name:
-                raise TCPError(0, "server requires auth; provide token_name and api_token")
-            proof = compute_proof(self.api_token, nonce)
-            auth_payload = self._encode_auth_proof(self.token_name, proof)
-            self._write_frame(MSG_AUTH_PROOF, auth_payload)
-            auth_type, auth_resp = self._read_frame()
-            if auth_type != MSG_AUTH_RESP:
-                raise TCPError(0, f"expected auth resp, got {auth_type:#04x}")
-            if not auth_resp or auth_resp[0] != 0:
-                code = auth_resp[0] if auth_resp else 0
-                raise TCPError(code, "auth failed")
+        try:
+            response = self._exchange(
+                protocol.Envelope(
+                    handshake_request=protocol.HandshakeRequest(client_name=self.client_name)
+                )
+            )
+            if not response.HasField("handshake_response"):
+                raise TCPError(0, f"expected handshake_response, got {response.WhichOneof('body')}")
+            handshake = response.handshake_response
+            if handshake.auth_required:
+                if not self.api_token or not self.token_name:
+                    raise TCPError(0, "server requires auth; provide token_name and api_token")
+                auth = self._exchange(
+                    protocol.Envelope(
+                        auth_request=protocol.AuthRequest(
+                            token_name=self.token_name,
+                            proof=compute_proof(self.api_token, handshake.nonce),
+                        )
+                    )
+                )
+                if not auth.HasField("auth_response") or not auth.auth_response.authenticated:
+                    raise TCPError(0, "authentication failed")
+        except Exception:
+            self.close()
+            raise
 
     def close(self) -> None:
-        if self._sock is not None:
-            try:
-                self._write_frame(MSG_CLOSE, b"")
-            except OSError:
-                pass
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-            self._sock = None
+        sock = self._sock
+        if sock is None:
+            return
+        try:
+            request = self._request(protocol.Envelope(close_request=protocol.CloseRequest()))
+            self._write_envelope(request)
+        except (OSError, ConnectionError, TCPError):
+            pass
+        try:
+            sock.close()
+        except OSError:
+            pass
+        self._sock = None
 
     def __enter__(self) -> "EEGDBTCPClient":
         self.connect()
@@ -115,9 +103,6 @@ class EEGDBTCPClient:
     def __exit__(self, *args: object) -> None:
         self.close()
 
-    # ------------------------------------------------------------------
-    # Upload
-    # ------------------------------------------------------------------
     def create_study(
         self,
         name: str,
@@ -125,27 +110,19 @@ class EEGDBTCPClient:
         attrs: Optional[Dict[str, Any]] = None,
         source_file: Optional[Dict[str, Any]] = None,
     ) -> str:
-        ch_json = json.dumps(channels).encode("utf-8")
-        attrs_json = json.dumps(attrs or {}).encode("utf-8")
-        source_json = json.dumps(source_file).encode("utf-8") if source_file else b""
-        name_b = name.encode("utf-8")
-        payload = (
-            struct.pack("<B", len(name_b))
-            + name_b
-            + struct.pack("<I", len(ch_json))
-            + ch_json
-            + struct.pack("<I", len(attrs_json))
-            + attrs_json
-            + struct.pack("<I", len(source_json))
-            + source_json
+        response = self._exchange(
+            protocol.Envelope(
+                create_study_request=protocol.CreateStudyRequest(
+                    name=name,
+                    channels=[self._channel_to_proto(channel) for channel in channels],
+                    attributes=self._attrs_to_proto(attrs or {}),
+                    source_file=self._source_to_proto(source_file) if source_file else None,
+                )
+            )
         )
-        self._write_frame(MSG_CREATE_STUDY, payload)
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_CREATE_STUDY:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return self._decode_study_id(resp)
+        if not response.HasField("create_study_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return response.create_study_response.study.study_id
 
     def write_batch(
         self,
@@ -155,52 +132,74 @@ class EEGDBTCPClient:
         start_index: int,
         data: Union[np.ndarray, List],
     ) -> None:
-        payload = self._encode_write_batch(study_id, channel_id, data_type, start_index, data)
-        self._write_frame(MSG_WRITE_BATCH, payload)
+        arr = np.asarray(data, dtype=self._numpy_dtype(data_type))
+        response = self._exchange(
+            protocol.Envelope(
+                write_batch_request=protocol.WriteBatchRequest(
+                    study_id=study_id,
+                    channel_id=channel_id,
+                    data_type=data_type,
+                    start_index=start_index,
+                    sample_count=len(arr),
+                    samples_le=arr.astype(arr.dtype.newbyteorder("<"), copy=False).tobytes(),
+                )
+            )
+        )
+        if not response.HasField("write_batch_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
 
     def write_events(self, study_id: str, events: List[Event]) -> None:
-        event_bytes = self._encode_events(events)
-        sid = study_id.encode("utf-8")
-        payload = struct.pack("<B", len(sid)) + sid + struct.pack("<I", len(event_bytes)) + event_bytes
-        self._write_frame(MSG_WRITE_EVENTS, payload)
+        response = self._exchange(
+            protocol.Envelope(
+                write_events_request=protocol.WriteEventsRequest(
+                    study_id=study_id,
+                    events=[self._event_to_proto(event) for event in events],
+                )
+            )
+        )
+        if not response.HasField("write_events_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+
+    def write_events_json(self, study_id: str, events: List[Event]) -> None:
+        """Compatibility name retained for upload pipelines; transport is Protobuf."""
+        self.write_events(study_id, events)
 
     def flush_study(self, study_id: str) -> None:
-        sid = study_id.encode("utf-8")
-        self._write_frame(MSG_FLUSH_STUDY, struct.pack("<B", len(sid)) + sid)
+        response = self._exchange(
+            protocol.Envelope(
+                flush_study_request=protocol.FlushStudyRequest(study_id=study_id)
+            )
+        )
+        if not response.HasField("flush_study_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
 
-    # ------------------------------------------------------------------
-    # Query / download
-    # ------------------------------------------------------------------
     def list_studies(self) -> List[Dict[str, Any]]:
-        self._write_frame(MSG_LIST_STUDIES_REQ, b"")
-        msg_type, payload = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(payload)
-        if msg_type != MSG_LIST_STUDIES_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        data = json.loads(self._decode_json_payload(payload))
-        return data.get("studies", [])
+        response = self._exchange(
+            protocol.Envelope(list_studies_request=protocol.ListStudiesRequest())
+        )
+        if not response.HasField("list_studies_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return [self._study_to_dict(study) for study in response.list_studies_response.studies]
 
     def get_study(self, study_id: str) -> Dict[str, Any]:
-        payload = self._encode_study_id(study_id)
-        self._write_frame(MSG_GET_STUDY_REQ, payload)
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_GET_STUDY_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return json.loads(self._decode_json_payload(resp))
+        response = self._exchange(
+            protocol.Envelope(
+                get_study_request=protocol.GetStudyRequest(study_id=study_id)
+            )
+        )
+        if not response.HasField("get_study_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return self._study_to_dict(response.get_study_response.study)
 
     def search_studies(self, attrs: Dict[str, str]) -> List[Dict[str, Any]]:
-        attrs_json = json.dumps(attrs).encode("utf-8")
-        self._write_frame(MSG_SEARCH_STUDIES_REQ, self._encode_json_payload(attrs_json))
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_SEARCH_STUDIES_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        data = json.loads(self._decode_json_payload(resp))
-        return data.get("studies", [])
+        response = self._exchange(
+            protocol.Envelope(
+                search_studies_request=protocol.SearchStudiesRequest(attributes=attrs)
+            )
+        )
+        if not response.HasField("search_studies_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return [self._study_to_dict(study) for study in response.search_studies_response.studies]
 
     def read_batch(
         self,
@@ -210,16 +209,24 @@ class EEGDBTCPClient:
         start_index: int,
         sample_count: int,
     ) -> Tuple[int, np.ndarray]:
-        if sample_count <= 0 or sample_count > MAX_READ_BATCH:
-            raise ValueError(f"sample_count must be 1..{MAX_READ_BATCH}")
-        payload = self._encode_read_batch_req(study_id, channel_id, data_type, start_index, sample_count)
-        self._write_frame(MSG_READ_BATCH_REQ, payload)
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_READ_BATCH_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return self._decode_write_batch(resp)
+        self._validate_read_count(sample_count)
+        response = self._exchange(
+            protocol.Envelope(
+                read_batch_request=protocol.ReadBatchRequest(
+                    study_id=study_id,
+                    channel_id=channel_id,
+                    data_type=data_type,
+                    start_index=start_index,
+                    sample_count=sample_count,
+                )
+            )
+        )
+        if not response.HasField("read_batch_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        batch = response.read_batch_response
+        dtype = np.dtype(self._numpy_dtype(batch.data_type)).newbyteorder("<")
+        values = np.frombuffer(batch.samples_le, dtype=dtype, count=batch.sample_count).copy()
+        return batch.start_index, values
 
     def read_compressed_batch(
         self,
@@ -230,39 +237,45 @@ class EEGDBTCPClient:
         sample_count: int,
         block_codec: int,
     ) -> Tuple[int, int, int, bytes]:
-        """ReadCompressedBatch (0x4A/0x4B).
-
-        Returns (start_index, sample_count, algo, compressed_payload).
-        ``block_codec`` is the Go BlockCodec id (0=lz4 … 4=best).
-        Client decodes ``compressed_payload`` with eegdb_codec using ``algo``.
-        """
-        if sample_count <= 0 or sample_count > MAX_READ_BATCH:
-            raise ValueError(f"sample_count must be 1..{MAX_READ_BATCH}")
+        self._validate_read_count(sample_count)
         if not 0 <= int(block_codec) <= 4:
             raise ValueError(f"block_codec must be 0..4, got {block_codec}")
-        payload = self._encode_read_compressed_batch_req(
-            study_id, channel_id, data_type, start_index, sample_count, int(block_codec)
+        response = self._exchange(
+            protocol.Envelope(
+                read_compressed_batch_request=protocol.ReadCompressedBatchRequest(
+                    study_id=study_id,
+                    channel_id=channel_id,
+                    data_type=data_type,
+                    start_index=start_index,
+                    sample_count=sample_count,
+                    block_codec=int(block_codec) + 1,
+                )
+            )
         )
-        self._write_frame(MSG_READ_COMPRESSED_BATCH_REQ, payload)
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_READ_COMPRESSED_BATCH_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        start, count, algo, compressed = self._decode_read_compressed_batch(resp)
-        return start, count, algo, compressed
+        if not response.HasField("read_compressed_batch_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        batch = response.read_compressed_batch_response
+        return (
+            batch.start_index,
+            batch.sample_count,
+            batch.compression_algorithm,
+            bytes(batch.compressed_data),
+        )
 
-    def read_events(self, study_id: str, filter_json: Optional[Dict[str, Any]] = None) -> List[Event]:
-        fj = json.dumps(filter_json or {}).encode("utf-8")
-        sid = study_id.encode("utf-8")
-        payload = struct.pack("<B", len(sid)) + sid + struct.pack("<I", len(fj)) + fj
-        self._write_frame(MSG_READ_EVENTS_REQ, payload)
-        msg_type, resp = self._read_frame()
-        if msg_type == MSG_ERROR:
-            raise self._parse_error(resp)
-        if msg_type != MSG_READ_EVENTS_RESP:
-            raise TCPError(0, f"unexpected msg {msg_type:#04x}")
-        return self._decode_events(resp)
+    def read_events(
+        self, study_id: str, filter_json: Optional[Dict[str, Any]] = None
+    ) -> List[Event]:
+        event_filter = self._event_filter_to_proto(filter_json or {})
+        response = self._exchange(
+            protocol.Envelope(
+                read_events_request=protocol.ReadEventsRequest(
+                    study_id=study_id, filter=event_filter
+                )
+            )
+        )
+        if not response.HasField("read_events_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return [self._event_from_proto(event) for event in response.read_events_response.events]
 
     def read_channel_all(
         self,
@@ -276,12 +289,6 @@ class EEGDBTCPClient:
         block_codec: int = 4,
         codec: Any = None,
     ) -> np.ndarray:
-        """Fetch a full channel.
-
-        When ``local_decode`` is True, uses ReadCompressedBatch and decodes with
-        ``codec`` (eegdb_client.codec_local.LocalCodec). Otherwise uses server-side
-        ReadBatch (uncompressed samples on the wire).
-        """
         chunks: List[np.ndarray] = []
         start = 0
         while start < total_samples:
@@ -289,173 +296,94 @@ class EEGDBTCPClient:
             if local_decode:
                 if codec is None:
                     raise ValueError("local_decode requires a LocalCodec instance")
-                _, got, algo, compressed = self.read_compressed_batch(
+                _, got, algorithm, compressed = self.read_compressed_batch(
                     study_id, channel_id, data_type, start, count, block_codec
                 )
                 if got == 0:
                     break
-                arr = codec.decode(data_type, algo, got, compressed)
-                chunks.append(arr)
+                chunks.append(codec.decode(data_type, algorithm, got, compressed))
                 start += got
             else:
-                _, arr = self.read_batch(study_id, channel_id, data_type, start, count)
-                chunks.append(arr)
-                start += count
+                _, values = self.read_batch(study_id, channel_id, data_type, start, count)
+                if len(values) == 0:
+                    break
+                chunks.append(values)
+                start += len(values)
         if not chunks:
             return np.array([], dtype=self._numpy_dtype(data_type))
         return np.concatenate(chunks)
 
-    # ------------------------------------------------------------------
-    # Wire helpers (protobuf envelope: [len:4 LE][version][msg_type][payload])
-    # ------------------------------------------------------------------
-    def _write_frame(self, msg_type: int, payload: bytes) -> None:
+    def _exchange(self, envelope: protocol.Envelope) -> protocol.Envelope:
+        request = self._request(envelope)
+        self._write_envelope(request)
+        response = self._read_envelope()
+        if response.request_id != request.request_id:
+            raise TCPError(
+                0,
+                f"request_id mismatch: got {response.request_id}, want {request.request_id}",
+            )
+        if response.HasField("error_response"):
+            error = response.error_response
+            raise TCPError(error.code, error.message, error.retryable)
+        return response
+
+    def _request(self, envelope: protocol.Envelope) -> protocol.Envelope:
+        envelope.protocol_version = PROTOCOL_VERSION
+        envelope.request_id = self._next_request_id
+        self._next_request_id += 1
+        return envelope
+
+    def _write_envelope(self, envelope: protocol.Envelope) -> None:
         if self._sock is None:
             raise RuntimeError("not connected")
-        envelope = self._encode_envelope(msg_type, payload)
-        self._sock.sendall(struct.pack("<I", len(envelope)) + envelope)
+        payload = envelope.SerializeToString(deterministic=True)
+        if not payload or len(payload) > MAX_FRAME_SIZE:
+            raise TCPError(0, f"invalid envelope length {len(payload)}")
+        length = struct.pack("<I", len(payload))
+        checksum_input = FRAME_MAGIC + length + payload
+        self._sock.sendall(checksum_input + struct.pack("<I", _crc32c(checksum_input)))
 
-    def _read_frame(self) -> Tuple[int, bytes]:
+    def _read_envelope(self) -> protocol.Envelope:
         if self._sock is None:
             raise RuntimeError("not connected")
-        frame_len = struct.unpack("<I", self._recv_exact(4))[0]
-        if frame_len == 0 or frame_len > MAX_FRAME_SIZE:
-            raise TCPError(0, f"invalid frame length {frame_len}")
-        return self._decode_envelope(self._recv_exact(frame_len))
+        self._read_magic()
+        encoded_length = self._recv_exact(4)
+        length = struct.unpack("<I", encoded_length)[0]
+        if length == 0 or length > MAX_FRAME_SIZE:
+            raise TCPError(0, f"invalid envelope length {length}")
+        payload = self._recv_exact(length)
+        expected_crc = struct.unpack("<I", self._recv_exact(4))[0]
+        actual_crc = _crc32c(FRAME_MAGIC + encoded_length + payload)
+        if actual_crc != expected_crc:
+            raise TCPError(0, f"crc32c mismatch: got {actual_crc:08x}, want {expected_crc:08x}")
+        envelope = protocol.Envelope()
+        envelope.ParseFromString(payload)
+        if envelope.protocol_version != PROTOCOL_VERSION:
+            raise TCPError(0, f"unsupported protocol version {envelope.protocol_version}")
+        if envelope.WhichOneof("body") is None:
+            raise TCPError(0, "envelope body is required")
+        return envelope
 
-    def _recv_exact(self, n: int) -> bytes:
+    def _read_magic(self) -> None:
+        matched = 0
+        while matched < len(FRAME_MAGIC):
+            value = self._recv_exact(1)[0]
+            if value == FRAME_MAGIC[matched]:
+                matched += 1
+            elif value == FRAME_MAGIC[0]:
+                matched = 1
+            else:
+                matched = 0
+
+    def _recv_exact(self, size: int) -> bytes:
         assert self._sock is not None
-        buf = bytearray()
-        while len(buf) < n:
-            chunk = self._sock.recv(n - len(buf))
+        data = bytearray()
+        while len(data) < size:
+            chunk = self._sock.recv(size - len(data))
             if not chunk:
                 raise ConnectionError("connection closed")
-            buf.extend(chunk)
-        return bytes(buf)
-
-    @staticmethod
-    def _encode_uvarint(value: int) -> bytes:
-        out = bytearray()
-        while value >= 0x80:
-            out.append((value & 0x7F) | 0x80)
-            value >>= 7
-        out.append(value & 0x7F)
-        return bytes(out)
-
-    @classmethod
-    def _encode_envelope(cls, msg_type: int, payload: bytes) -> bytes:
-        out = bytearray()
-        # field 1 = protocol version (varint)
-        out.extend(cls._encode_uvarint(1 << 3))
-        out.extend(cls._encode_uvarint(PROTOCOL_VERSION))
-        # field 2 = message type (varint)
-        out.extend(cls._encode_uvarint(2 << 3))
-        out.extend(cls._encode_uvarint(msg_type))
-        if payload:
-            # field 4 = payload (bytes)
-            out.extend(cls._encode_uvarint((4 << 3) | 2))
-            out.extend(cls._encode_uvarint(len(payload)))
-            out.extend(payload)
-        return bytes(out)
-
-    @staticmethod
-    def _decode_uvarint(data: bytes, off: int) -> Tuple[int, int]:
-        value = 0
-        shift = 0
-        while True:
-            if off >= len(data):
-                raise TCPError(0, "truncated protobuf varint")
-            b = data[off]
-            off += 1
-            value |= (b & 0x7F) << shift
-            if (b & 0x80) == 0:
-                return value, off
-            shift += 7
-            if shift > 63:
-                raise TCPError(0, "protobuf varint too long")
-
-    @classmethod
-    def _decode_envelope(cls, data: bytes) -> Tuple[int, bytes]:
-        msg_type = 0
-        payload = b""
-        off = 0
-        while off < len(data):
-            tag, off = cls._decode_uvarint(data, off)
-            field_num = tag >> 3
-            wire_type = tag & 0x7
-            if field_num in (1, 2, 3):
-                if wire_type != 0:
-                    raise TCPError(0, f"field {field_num} invalid wire type {wire_type}")
-                value, off = cls._decode_uvarint(data, off)
-                if field_num == 2:
-                    msg_type = value
-            elif field_num == 4:
-                if wire_type != 2:
-                    raise TCPError(0, f"payload invalid wire type {wire_type}")
-                n, off = cls._decode_uvarint(data, off)
-                end = off + n
-                if end > len(data):
-                    raise TCPError(0, "truncated protobuf bytes field")
-                payload = data[off:end]
-                off = end
-            else:
-                if wire_type == 0:
-                    _, off = cls._decode_uvarint(data, off)
-                elif wire_type == 2:
-                    n, off = cls._decode_uvarint(data, off)
-                    off += n
-                else:
-                    raise TCPError(0, f"unsupported wire type {wire_type}")
-        if msg_type == 0:
-            raise TCPError(0, "envelope missing message type")
-        return msg_type, payload
-
-    @staticmethod
-    def _encode_handshake(client_name: str) -> bytes:
-        name = client_name.encode("utf-8")
-        return struct.pack("<BB", PROTOCOL_VERSION, len(name)) + name
-
-    @staticmethod
-    def _decode_handshake_resp(payload: bytes) -> Tuple[int, str, bytes]:
-        status = payload[0]
-        ver_len = payload[1]
-        ver = payload[2 : 2 + ver_len].decode("utf-8")
-        off = 2 + ver_len
-        nonce = b""
-        if off < len(payload):
-            nonce_len = payload[off]
-            nonce = payload[off + 1 : off + 1 + nonce_len]
-        return status, ver, nonce
-
-    @staticmethod
-    def _encode_auth_proof(token_name: str, proof: bytes) -> bytes:
-        name = token_name.encode("utf-8")
-        return struct.pack("<B", len(name)) + name + proof
-
-    @staticmethod
-    def _encode_study_id(study_id: str) -> bytes:
-        sid = study_id.encode("utf-8")
-        return struct.pack("<B", len(sid)) + sid
-
-    @staticmethod
-    def _encode_json_payload(data: bytes) -> bytes:
-        return struct.pack("<I", len(data)) + data
-
-    @staticmethod
-    def _decode_json_payload(data: bytes) -> bytes:
-        n = struct.unpack("<I", data[:4])[0]
-        return data[4 : 4 + n]
-
-    @staticmethod
-    def _decode_study_id(data: bytes) -> str:
-        n = data[0]
-        return data[1 : 1 + n].decode("utf-8")
-
-    @staticmethod
-    def _parse_error(payload: bytes) -> TCPError:
-        code = payload[0]
-        msg_len = struct.unpack("<H", payload[1:3])[0]
-        msg = payload[3 : 3 + msg_len].decode("utf-8", errors="replace")
-        return TCPError(code, msg)
+            data.extend(chunk)
+        return bytes(data)
 
     @staticmethod
     def _numpy_dtype(data_type: int) -> np.dtype:
@@ -467,124 +395,183 @@ class EEGDBTCPClient:
             DT_INT64: np.int64,
         }[data_type]
 
-    def _encode_write_batch(
-        self,
-        study_id: str,
-        channel_id: int,
-        data_type: int,
-        start_index: int,
-        data: Union[np.ndarray, List],
-    ) -> bytes:
-        arr = np.asarray(data)
-        sid = study_id.encode("utf-8")
-        header = struct.pack("<B", len(sid)) + sid + struct.pack("<HBQ", channel_id, data_type, start_index)
-        if data_type == DT_INT16:
-            body = arr.astype(np.int16).tobytes()
-        elif data_type == DT_INT24:
-            body = arr.astype(np.int32).tobytes()
-        elif data_type == DT_FLOAT32:
-            body = arr.astype(np.float32).tobytes()
-        elif data_type == DT_FLOAT64:
-            body = arr.astype(np.float64).tobytes()
-        elif data_type == DT_INT64:
-            body = arr.astype(np.int64).tobytes()
-        else:
-            raise ValueError(f"unsupported data_type {data_type:#x}")
-        return header + struct.pack("<I", len(arr)) + body
+    @staticmethod
+    def _validate_read_count(sample_count: int) -> None:
+        if sample_count <= 0 or sample_count > MAX_READ_BATCH:
+            raise ValueError(f"sample_count must be 1..{MAX_READ_BATCH}")
 
     @staticmethod
-    def _encode_read_batch_req(
-        study_id: str, channel_id: int, data_type: int, start_index: int, sample_count: int
-    ) -> bytes:
-        sid = study_id.encode("utf-8")
-        return (
-            struct.pack("<B", len(sid))
-            + sid
-            + struct.pack("<HBQ", channel_id, data_type, start_index)
-            + struct.pack("<I", sample_count)
+    def _channel_to_proto(value: Dict[str, Any]) -> protocol.ChannelDefinition:
+        return protocol.ChannelDefinition(
+            channel_id=int(value.get("channel_id", 0)),
+            label=str(value.get("label", "")),
+            type=str(value.get("type", "")),
+            unit=str(value.get("unit", "")),
+            sample_rate=float(value.get("sample_rate", 0)),
+            data_type=int(value.get("data_type", DT_INT16)),
+            physical_min=float(value.get("physical_min", 0)),
+            physical_max=float(value.get("physical_max", 0)),
+            digital_min=int(value.get("digital_min", 0)),
+            digital_max=int(value.get("digital_max", 0)),
+            prefilter=str(value.get("prefilter", "")),
+            transducer=str(value.get("transducer", "")),
         )
 
     @staticmethod
-    def _encode_read_compressed_batch_req(
-        study_id: str,
-        channel_id: int,
-        data_type: int,
-        start_index: int,
-        sample_count: int,
-        block_codec: int,
-    ) -> bytes:
-        sid = study_id.encode("utf-8")
-        return (
-            struct.pack("<B", len(sid))
-            + sid
-            + struct.pack("<HBQ", channel_id, data_type, start_index)
-            + struct.pack("<IB", sample_count, block_codec & 0xFF)
+    def _attrs_to_proto(value: Dict[str, Any]) -> protocol.StudyAttributes:
+        known = {
+            "lab",
+            "paradigm",
+            "device_type",
+            "population",
+            "condition",
+            "session",
+            "pi",
+            "principal_investigator",
+            "device_serial",
+            "sampling_rate",
+            "ethics_approval",
+            "custom",
+        }
+        custom = {str(k): str(v) for k, v in (value.get("custom") or {}).items()}
+        custom.update({str(k): str(v) for k, v in value.items() if k not in known})
+        return protocol.StudyAttributes(
+            lab=str(value.get("lab", "")),
+            paradigm=str(value.get("paradigm", "")),
+            device_type=str(value.get("device_type", "")),
+            population=str(value.get("population", "")),
+            condition=str(value.get("condition", "")),
+            session=str(value.get("session", "")),
+            principal_investigator=str(
+                value.get("principal_investigator", value.get("pi", ""))
+            ),
+            device_serial=str(value.get("device_serial", "")),
+            sampling_rate=str(value.get("sampling_rate", "")),
+            ethics_approval=str(value.get("ethics_approval", "")),
+            custom=custom,
         )
 
-    def _decode_write_batch(self, data: bytes) -> Tuple[int, np.ndarray]:
-        off = 0
-        id_len = data[off]
-        off += 1 + id_len
-        channel_id, data_type, start_index = struct.unpack_from("<HBQ", data, off)
-        off += 11
-        sample_count = struct.unpack_from("<I", data, off)[0]
-        off += 4
-        raw = data[off:]
-        dtype = self._numpy_dtype(data_type)
-        arr = np.frombuffer(raw, dtype=dtype, count=sample_count)
-        return start_index, arr.copy()
+    @staticmethod
+    def _source_to_proto(value: Dict[str, Any]) -> protocol.SourceFileMetadata:
+        return protocol.SourceFileMetadata(
+            original_name=str(value.get("original_name", "")),
+            source_uri=str(value.get("source_uri", "")),
+            stored_path=str(value.get("stored_path", "")),
+            format=str(value.get("format", "")),
+            sha256=str(value.get("sha256", "")),
+            size_bytes=int(value.get("size_bytes", 0)),
+            imported_by=str(value.get("imported_by", "")),
+            software_version=str(value.get("software_version", "")),
+            imported_at_unix_ms=int(value.get("imported_at_unix_ms", 0)),
+            modified_at_unix_ms=int(value.get("modified_at_unix_ms", 0)),
+        )
 
     @staticmethod
-    def _decode_read_compressed_batch(data: bytes) -> Tuple[int, int, int, bytes]:
-        """Returns (start_index, sample_count, algo, compressed_payload)."""
-        if len(data) < 1 + 2 + 1 + 8 + 4 + 1 + 4:
-            raise TCPError(0, "read compressed batch resp too short")
-        id_len = data[0]
-        off = 1 + id_len
-        if off + 2 + 1 + 8 + 4 + 1 + 4 > len(data):
-            raise TCPError(0, "truncated read compressed batch resp header")
-        # channel_id, data_type unused by caller but present on wire
-        _channel_id, _data_type, start_index = struct.unpack_from("<HBQ", data, off)
-        off += 11
-        sample_count = struct.unpack_from("<I", data, off)[0]
-        off += 4
-        algo = data[off]
-        off += 1
-        payload_len = struct.unpack_from("<I", data, off)[0]
-        off += 4
-        if payload_len < 0 or off + payload_len > len(data):
-            raise TCPError(0, "truncated compressed payload")
-        return start_index, sample_count, algo, data[off : off + payload_len]
+    def _event_to_proto(value: Event) -> protocol.Event:
+        return protocol.Event(
+            event_id=value.event_id,
+            type=value.type,
+            onset_us=value.onset,
+            duration_us=value.duration,
+            channel_id=value.channel_id,
+            code=value.code,
+            description=value.description,
+            trial_id=value.trial_id,
+            source=value.source,
+            confidence=value.confidence,
+            attributes=value.attributes,
+        )
 
     @staticmethod
-    def _encode_events(events: List[Event]) -> bytes:
-        parts = []
-        for e in events:
-            code = e.code.encode("utf-8")
-            desc = e.description.encode("utf-8")
-            parts.append(
-                struct.pack("<QQH", e.onset, e.duration, e.channel_id)
-                + struct.pack("<H", len(code))
-                + code
-                + struct.pack("<H", len(desc))
-                + desc
-            )
-        return b"".join(parts)
+    def _event_from_proto(value: protocol.Event) -> Event:
+        return Event(
+            event_id=value.event_id,
+            type=value.type,
+            onset=value.onset_us,
+            duration=value.duration_us,
+            channel_id=value.channel_id,
+            code=value.code,
+            description=value.description,
+            trial_id=value.trial_id,
+            source=value.source,
+            confidence=value.confidence,
+            attributes=dict(value.attributes),
+        )
 
     @staticmethod
-    def _decode_events(data: bytes) -> List[Event]:
-        events: List[Event] = []
-        off = 0
-        while off + 20 <= len(data):
-            onset, duration, ch_id = struct.unpack_from("<QQH", data, off)
-            off += 18
-            code_len = struct.unpack_from("<H", data, off)[0]
-            off += 2
-            code = data[off : off + code_len].decode("utf-8")
-            off += code_len
-            desc_len = struct.unpack_from("<H", data, off)[0]
-            off += 2
-            desc = data[off : off + desc_len].decode("utf-8")
-            off += desc_len
-            events.append(Event(onset=onset, duration=duration, channel_id=ch_id, code=code, description=desc))
-        return events
+    def _event_filter_to_proto(value: Dict[str, Any]) -> protocol.EventFilter:
+        result = protocol.EventFilter(
+            code_prefix=str(value.get("code_prefix", "")),
+            type=str(value.get("type", "")),
+            trial_id=str(value.get("trial_id", "")),
+            source=str(value.get("source", "")),
+        )
+        if "start_us" in value:
+            result.start_us = int(value["start_us"])
+        if "end_us" in value:
+            result.end_us = int(value["end_us"])
+        if "channel_id" in value and value["channel_id"] is not None:
+            result.channel_id = int(value["channel_id"])
+        return result
+
+    @classmethod
+    def _study_to_dict(cls, value: protocol.Study) -> Dict[str, Any]:
+        return {
+            "study_id": value.study_id,
+            "name": value.name,
+            "attributes": {
+                "lab": value.attributes.lab,
+                "pi": value.attributes.principal_investigator,
+                "device_type": value.attributes.device_type,
+                "device_serial": value.attributes.device_serial,
+                "sampling_rate": value.attributes.sampling_rate,
+                "paradigm": value.attributes.paradigm,
+                "population": value.attributes.population,
+                "condition": value.attributes.condition,
+                "session": value.attributes.session,
+                "ethics_approval": value.attributes.ethics_approval,
+                "custom": dict(value.attributes.custom),
+            },
+            "channels": [
+                {
+                    "channel_id": channel.channel_id,
+                    "label": channel.label,
+                    "type": channel.type,
+                    "unit": channel.unit,
+                    "sample_rate": channel.sample_rate,
+                    "data_type": channel.data_type,
+                    "physical_min": channel.physical_min,
+                    "physical_max": channel.physical_max,
+                    "digital_min": channel.digital_min,
+                    "digital_max": channel.digital_max,
+                    "prefilter": channel.prefilter,
+                    "transducer": channel.transducer,
+                }
+                for channel in value.channels
+            ],
+            "start_index": value.start_index,
+            "end_index": value.end_index,
+            "num_samples": value.num_samples,
+            "created_at_unix_ms": value.created_at_unix_ms,
+            "updated_at_unix_ms": value.updated_at_unix_ms,
+        }
+
+
+_CRC32C_TABLE: Optional[Tuple[int, ...]] = None
+
+
+def _crc32c(data: bytes) -> int:
+    global _CRC32C_TABLE
+    if _CRC32C_TABLE is None:
+        polynomial = 0x82F63B78
+        table = []
+        for value in range(256):
+            crc = value
+            for _ in range(8):
+                crc = (crc >> 1) ^ polynomial if crc & 1 else crc >> 1
+            table.append(crc)
+        _CRC32C_TABLE = tuple(table)
+    crc = 0xFFFFFFFF
+    for value in data:
+        crc = _CRC32C_TABLE[(crc ^ value) & 0xFF] ^ (crc >> 8)
+    return crc ^ 0xFFFFFFFF
