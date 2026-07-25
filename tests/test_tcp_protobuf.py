@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import struct
 import unittest
+import json
+from pathlib import Path
 
 from eegdb_client.protocol.v1 import protocol_pb2 as protocol
 from eegdb_client.transport.tcp_client import (
@@ -53,6 +55,31 @@ class ProtobufFrameTests(unittest.TestCase):
 
     def test_crc32c_known_vector(self) -> None:
         self.assertEqual(_crc32c(b"123456789"), 0xE3069283)
+
+    def test_go_golden_frames_are_byte_identical(self) -> None:
+        fixture_path = (
+            Path(__file__).resolve().parents[2]
+            / "EEGDB"
+            / "testdata"
+            / "tcp_protobuf_v1"
+            / "frames.json"
+        )
+        fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(fixtures["protocol_version"], PROTOCOL_VERSION)
+        client = EEGDBTCPClient("localhost", 9000)
+
+        for item in fixtures["fixtures"]:
+            with self.subTest(name=item["name"]):
+                envelope_bytes = bytes.fromhex(item["envelope_hex"])
+                envelope = protocol.Envelope.FromString(envelope_bytes)
+                self.assertEqual(
+                    envelope.SerializeToString(deterministic=True), envelope_bytes
+                )
+
+                output = RecordingSocket()
+                client._sock = output  # type: ignore[assignment]
+                client._write_envelope(envelope)
+                self.assertEqual(bytes(output.written), bytes.fromhex(item["frame_hex"]))
 
 
 if __name__ == "__main__":
