@@ -36,6 +36,7 @@ class ProtobufFrameTests(unittest.TestCase):
         request = protocol.Envelope(
             protocol_version=PROTOCOL_VERSION,
             request_id=42,
+            database_id="default",
             heartbeat_request=protocol.HeartbeatRequest(),
         )
         output = RecordingSocket()
@@ -51,7 +52,15 @@ class ProtobufFrameTests(unittest.TestCase):
         client._sock = RecordingSocket(wire)  # type: ignore[assignment]
         decoded = client._read_envelope()
         self.assertEqual(decoded.request_id, 42)
+        self.assertEqual(decoded.database_id, "default")
         self.assertTrue(decoded.HasField("heartbeat_request"))
+
+    def test_request_adds_database_id(self) -> None:
+        client = EEGDBTCPClient("localhost", 9000, database="lab")
+        request = client._request(
+            protocol.Envelope(heartbeat_request=protocol.HeartbeatRequest())
+        )
+        self.assertEqual(request.database_id, "lab")
 
     def test_crc32c_known_vector(self) -> None:
         self.assertEqual(_crc32c(b"123456789"), 0xE3069283)

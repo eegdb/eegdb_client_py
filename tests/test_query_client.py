@@ -40,7 +40,10 @@ def test_query_client_builds_get_request(monkeypatch):
     req, timeout = calls[0]
     assert timeout == 3
     assert req.get_method() == "GET"
-    assert req.full_url == "http://localhost:8080/api/v1/studies/s1/psd?channels=0%2C1&idx_start=0&idx_end=1000"
+    assert req.full_url == (
+        "http://localhost:8080/api/v1/databases/default/studies/s1/psd"
+        "?channels=0%2C1&idx_start=0&idx_end=1000"
+    )
 
 
 def test_query_client_builds_post_json_request(monkeypatch):
@@ -52,13 +55,13 @@ def test_query_client_builds_post_json_request(monkeypatch):
 
     monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
 
-    client = EEGDBQueryClient("http://localhost:8080")
+    client = EEGDBQueryClient("http://localhost:8080", database="lab")
     resp = client.submit_job("quality_scan", study_id="s1", detector_options={"window_samples": 64})
 
     assert resp == {"job_id": "quality_scan-1"}
     req, _ = calls[0]
     assert req.get_method() == "POST"
-    assert req.full_url == "http://localhost:8080/api/v1/admin/jobs"
+    assert req.full_url == "http://localhost:8080/api/v1/databases/lab/admin/jobs"
     assert req.headers["Content-type"] == "application/json"
     assert json.loads(req.data.decode("utf-8")) == {
         "type": "quality_scan",
@@ -81,5 +84,16 @@ def test_query_client_quality_scan_async_path(monkeypatch):
 
     assert resp == {"type": "quality_scan"}
     req = calls[0]
-    assert req.full_url == "http://localhost:8080/api/v1/studies/s1/quality/scan?async=true"
+    assert req.full_url == (
+        "http://localhost:8080/api/v1/databases/default/studies/s1/quality/scan?async=true"
+    )
     assert json.loads(req.data.decode("utf-8")) == {"line_frequency": 60}
+
+
+def test_query_client_requires_database():
+    try:
+        EEGDBQueryClient(database=" ")
+    except ValueError as exc:
+        assert "database is required" in str(exc)
+    else:
+        raise AssertionError("expected missing database error")

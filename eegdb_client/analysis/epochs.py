@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -64,6 +64,7 @@ class EEGDBEpochs:
         base_url: str,
         study_id: str,
         *,
+        database: str = "default",
         channels: Optional[List[int]] = None,
         event_type: str = "stimulus",
         code: str = "",
@@ -80,6 +81,7 @@ class EEGDBEpochs:
         response = query_epochs_http(
             base_url,
             study_id,
+            database=database,
             channels=channels,
             event_type=event_type,
             code=code,
@@ -183,6 +185,7 @@ def query_epochs_http(
     base_url: str,
     study_id: str,
     *,
+    database: str = "default",
     channels: Optional[List[int]] = None,
     event_type: str = "stimulus",
     code: str = "",
@@ -218,7 +221,13 @@ def query_epochs_http(
     if include_artifacts:
         params["include_artifacts"] = "true"
 
-    url = f"{base_url.rstrip('/')}/api/v1/studies/{study_id}/epochs?{urlencode(params)}"
+    database = database.strip()
+    if not database:
+        raise ValueError("database is required")
+    url = (
+        f"{base_url.rstrip('/')}/api/v1/databases/{quote(database, safe='')}"
+        f"/studies/{study_id}/epochs?{urlencode(params)}"
+    )
     req = Request(url, headers={"Accept": "application/json"})
     with urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))

@@ -15,6 +15,7 @@ def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
     return EEGDBTCPClient(
         args.host,
         args.port,
+        database=args.database,
         token_name=args.token_name,
         api_token=args.api_token,
     )
@@ -82,6 +83,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="eegdb-client")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8081)
+    parser.add_argument("--database", default="default", help="Database name (default: default)")
     parser.add_argument("--token-name", default="", help="API token name (when server auth enabled)")
     parser.add_argument("--api-token", default="", help="API token secret (when server auth enabled)")
     parser.add_argument("-v", "--verbose", action="store_true")

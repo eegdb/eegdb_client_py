@@ -96,7 +96,8 @@ Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt`, `.ceo`,
 FLOAT channels are uploaded as-is over TCP. Compression, including `uv0.1`
 lossy FLOAT compression, is configured on the EEGDB server.
 
-Common options: `--host`, `--port`, `--token-name`, `--api-token`, `-v`.
+Common options: `--host`, `--port`, `--database`, `--token-name`,
+`--api-token`, `-v`.
 
 ## Epoch analysis helper
 
@@ -110,6 +111,7 @@ from eegdb_client import EEGDBEpochs
 epochs = EEGDBEpochs.from_http(
     "http://localhost:8080",
     "STUDY_ID",
+    database="default",
     channels=[0, 1],
     event_type="stimulus",
     code="target",
@@ -133,7 +135,7 @@ Uploads and downloads use TCP. For analysis and admin reads, use
 ```python
 from eegdb_client import EEGDBQueryClient
 
-client = EEGDBQueryClient("http://localhost:8080")
+client = EEGDBQueryClient("http://localhost:8080", database="default")
 
 studies = client.list_studies()
 study = client.get_study("STUDY_ID")

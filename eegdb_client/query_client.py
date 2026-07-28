@@ -4,15 +4,26 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, Iterable, List, Mapping, Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
 class EEGDBQueryClient:
     """Small notebook-friendly HTTP client for EEGDB read/query APIs."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:8080", *, timeout: float = 120):
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:8080",
+        *,
+        database: str = "default",
+        timeout: float = 120,
+    ):
         self.base_url = base_url.rstrip("/")
+        database = database.strip()
+        if not database:
+            raise ValueError("database is required")
+        self.database = database
+        self.api_base = f"/api/v1/databases/{quote(database, safe='')}"
         self.timeout = timeout
 
     def list_studies(self) -> Dict[str, Any]:
@@ -149,7 +160,9 @@ class EEGDBQueryClient:
         body: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         query = encode_params(params or {})
-        url = f"{self.base_url}{path}"
+        if not path.startswith("/api/v1/"):
+            raise ValueError(f"unexpected API path: {path}")
+        url = f"{self.base_url}{self.api_base}{path.removeprefix('/api/v1')}"
         if query:
             url = f"{url}?{query}"
         data = None

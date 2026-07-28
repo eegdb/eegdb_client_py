@@ -33,12 +33,17 @@ class EEGDBTCPClient:
         self,
         host: str,
         port: int,
+        *,
+        database: str = "default",
         client_name: str = "eegdb-client",
         token_name: str = "",
         api_token: str = "",
     ):
         self.host = host
         self.port = port
+        self.database = database.strip()
+        if not self.database:
+            raise ValueError("database is required")
         self.client_name = client_name
         self.token_name = token_name
         self.api_token = api_token
@@ -322,6 +327,11 @@ class EEGDBTCPClient:
                 0,
                 f"request_id mismatch: got {response.request_id}, want {request.request_id}",
             )
+        if response.database_id != self.database:
+            raise TCPError(
+                0,
+                f"database_id mismatch: got {response.database_id}, want {self.database}",
+            )
         if response.HasField("error_response"):
             error = response.error_response
             raise TCPError(error.code, error.message, error.retryable)
@@ -330,6 +340,7 @@ class EEGDBTCPClient:
     def _request(self, envelope: protocol.Envelope) -> protocol.Envelope:
         envelope.protocol_version = PROTOCOL_VERSION
         envelope.request_id = self._next_request_id
+        envelope.database_id = self.database
         self._next_request_id += 1
         return envelope
 
