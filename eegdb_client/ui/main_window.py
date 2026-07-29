@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from PyQt6.QtCore import Qt
@@ -16,8 +17,11 @@ from qfluentwidgets import (
 )
 
 from ..transport.tcp_client import EEGDBTCPClient
+from ..logging_config import configure_logging, install_exception_hook
 from .pages import BrowsePage, ConnectPage, UploadPage
 from .workers import Worker
+
+logger = logging.getLogger(__package__)
 
 
 class MainWindow(FluentWindow):
@@ -90,6 +94,7 @@ class MainWindow(FluentWindow):
         worker.start()
 
     def handle_tcp_failure(self, title: str, message: str) -> None:
+        logger.error("%s: %s", title, message)
         if self.is_connected():
             self.set_client(None)
             self.connect_page.on_forced_disconnect(f"{title}: {message}")
@@ -106,6 +111,7 @@ class MainWindow(FluentWindow):
         self.set_busy(False)
 
     def _on_connection_changed(self, connected: bool) -> None:
+        logger.info("connection state changed: connected=%s", connected)
         self._sync_pages()
         if connected:
             self.switchTo(self.browse_page)
@@ -122,6 +128,7 @@ class MainWindow(FluentWindow):
         setTheme(Theme.DARK if self._theme_dark else Theme.LIGHT)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        logger.info("application window closing")
         if self._worker is not None and self._worker.isRunning():
             self._worker.wait()
         self.set_client(None)
@@ -131,6 +138,9 @@ class MainWindow(FluentWindow):
 def run_app() -> None:
     import sys
 
+    log_path = configure_logging()
+    install_exception_hook()
+    logger.info("GUI starting; log file: %s", log_path)
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )

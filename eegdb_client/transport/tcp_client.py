@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import struct
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -11,6 +12,8 @@ import numpy as np
 from ..auth_proof import compute_proof
 from ..models import DT_FLOAT32, DT_FLOAT64, DT_INT16, DT_INT24, DT_INT64, Event
 from ..protocol.v1 import protocol_pb2 as protocol
+
+logger = logging.getLogger(__package__)
 
 PROTOCOL_VERSION = 1
 FRAME_MAGIC = b"EDB"
@@ -55,6 +58,12 @@ class EEGDBTCPClient:
         return self._sock is not None
 
     def connect(self) -> None:
+        logger.info(
+            "connecting to EEGDB host=%s port=%s database=%s",
+            self.host,
+            self.port,
+            self.database,
+        )
         self.close()
         sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -82,7 +91,20 @@ class EEGDBTCPClient:
                 )
                 if not auth.HasField("auth_response") or not auth.auth_response.authenticated:
                     raise TCPError(0, "authentication failed")
+            logger.info(
+                "connected to EEGDB host=%s port=%s database=%s auth_required=%s",
+                self.host,
+                self.port,
+                self.database,
+                handshake.auth_required,
+            )
         except Exception:
+            logger.exception(
+                "connection failed host=%s port=%s database=%s",
+                self.host,
+                self.port,
+                self.database,
+            )
             self.close()
             raise
 
@@ -100,6 +122,7 @@ class EEGDBTCPClient:
         except OSError:
             pass
         self._sock = None
+        logger.info("connection closed host=%s port=%s", self.host, self.port)
 
     def __enter__(self) -> "EEGDBTCPClient":
         self.connect()
@@ -320,6 +343,12 @@ class EEGDBTCPClient:
 
     def _exchange(self, envelope: protocol.Envelope) -> protocol.Envelope:
         request = self._request(envelope)
+        logger.debug(
+            "TCP request id=%s body=%s database=%s",
+            request.request_id,
+            request.WhichOneof("body"),
+            self.database,
+        )
         self._write_envelope(request)
         response = self._read_envelope()
         if response.request_id != request.request_id:
@@ -334,7 +363,19 @@ class EEGDBTCPClient:
             )
         if response.HasField("error_response"):
             error = response.error_response
+            logger.warning(
+                "TCP error response id=%s code=%s retryable=%s message=%s",
+                response.request_id,
+                error.code,
+                error.retryable,
+                error.message,
+            )
             raise TCPError(error.code, error.message, error.retryable)
+        logger.debug(
+            "TCP response id=%s body=%s",
+            response.request_id,
+            response.WhichOneof("body"),
+        )
         return response
 
     def _request(self, envelope: protocol.Envelope) -> protocol.Envelope:

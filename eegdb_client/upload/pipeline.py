@@ -12,6 +12,7 @@ Download may optionally use TCP ReadCompressedBatch + local eegdb_codec decode
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Callable, Optional
 
@@ -21,6 +22,7 @@ from ..models import SourceFile, StudyAttrs
 from ..transport.tcp_client import EEGDBTCPClient
 
 ProgressCallback = Callable[[str, float], None]
+logger = logging.getLogger(__package__)
 
 
 def upload_source_file(
@@ -30,6 +32,12 @@ def upload_source_file(
     batch_seconds: float = 10.0,
     on_progress: Optional[ProgressCallback] = None,
 ) -> str:
+    logger.info(
+        "upload started file=%s format=%s channels=%s",
+        os.path.basename(source.path),
+        source.format,
+        len(source.channels),
+    )
     attrs_dict = (attrs or StudyAttrs()).to_dict()
     channels = [ch.to_dict() for ch in source.channels]
     channel_data = {int(ch.channel_id): np.asarray(source.channel_data[int(ch.channel_id)]) for ch in source.channels}
@@ -80,4 +88,5 @@ def upload_source_file(
     client.flush_study(study_id)
     if on_progress:
         on_progress("Flush complete", 1.0)
+    logger.info("upload completed study_id=%s", study_id)
     return study_id

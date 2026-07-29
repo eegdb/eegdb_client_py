@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
 from .download.fetcher import download_study
+from .logging_config import configure_logging, install_exception_hook
 from .models import StudyAttrs
 from .readers import load_source_file
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
+
+logger = logging.getLogger(__package__)
 
 
 def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
@@ -87,6 +91,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--token-name", default="", help="API token name (when server auth enabled)")
     parser.add_argument("--api-token", default="", help="API token secret (when server auth enabled)")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="log file path (default: platform user log directory)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_health = sub.add_parser("health", help="TCP connection check")
@@ -127,7 +136,18 @@ def main(argv: list[str] | None = None) -> None:
     p_dl.set_defaults(func=cmd_download)
 
     args = parser.parse_args(argv)
-    args.func(args)
+    log_path = configure_logging(verbose=args.verbose, log_file=args.log_file)
+    install_exception_hook()
+    logger.info("CLI command started: %s", args.command)
+    try:
+        args.func(args)
+    except Exception:
+        logger.exception("CLI command failed: %s", args.command)
+        raise
+    else:
+        logger.info("CLI command completed: %s", args.command)
+        if args.verbose:
+            logger.debug("log file: %s", log_path)
 
 
 if __name__ == "__main__":

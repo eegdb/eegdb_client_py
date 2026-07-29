@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Callable, Optional
 
@@ -14,6 +15,7 @@ from .writers.fif_writer import write_fif_from_study
 from .writers.npz_writer import write_npz_from_study
 
 ProgressCallback = Callable[[str, float], None]
+logger = logging.getLogger(__package__)
 
 
 def download_study(
@@ -32,6 +34,12 @@ def download_study(
     When ``local_decode`` is True, each batch uses TCP ReadCompressedBatch and is
     decoded locally via eegdb-codec (requires the eegdb_codec package / shared lib).
     """
+    logger.info(
+        "download started study_id=%s format=%s local_decode=%s",
+        study_id,
+        fmt,
+        local_decode,
+    )
     study = client.get_study(study_id)
     channels = study.get("channels", [])
     if not channels:
@@ -91,6 +99,7 @@ def download_study(
 
     if on_progress:
         on_progress("Saved " + os.path.basename(output_path), 1.0)
+    logger.info("download completed study_id=%s output=%s", study_id, output_path)
     return output_path
 
 

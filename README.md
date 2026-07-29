@@ -99,6 +99,19 @@ lossy FLOAT compression, is configured on the EEGDB server.
 Common options: `--host`, `--port`, `--database`, `--token-name`,
 `--api-token`, `-v`.
 
+## Logs
+
+Both the GUI and CLI write rotating logs to the platform user log directory.
+On Linux the default is typically:
+
+```text
+~/.local/state/EEGDBClient/log/eegdb-client.log
+```
+
+Use `-v` for debug-level CLI and file logs, or `--log-file PATH` to select a
+different CLI log file. Logs rotate at 5 MiB and retain three backups. API
+token secrets are never logged.
+
 ## Epoch analysis helper
 
 `EEGDBEpochs` wraps the server epoch API response as a NumPy tensor shaped
