@@ -162,6 +162,8 @@ class EEGDBQueryClient:
         query = encode_params(params or {})
         if not path.startswith("/api/v1/"):
             raise ValueError(f"unexpected API path: {path}")
+        # 对外方法使用与服务端文档一致的 /api/v1/... 相对路径；这里统一插入
+        # /databases/{database} 作用域，避免每个 API 方法重复拼接和转义。
         url = f"{self.base_url}{self.api_base}{path.removeprefix('/api/v1')}"
         if query:
             url = f"{url}?{query}"

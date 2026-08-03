@@ -58,6 +58,7 @@ class EEGDBTCPClient:
         return self._sock is not None
 
     def connect(self) -> None:
+        """建立 TCP 会话，并在服务端要求时完成 challenge-response 认证。"""
         logger.info(
             "connecting to EEGDB host=%s port=%s database=%s",
             self.host,
@@ -342,6 +343,7 @@ class EEGDBTCPClient:
         return np.concatenate(chunks)
 
     def _exchange(self, envelope: protocol.Envelope) -> protocol.Envelope:
+        """发送一个请求并校验响应是否属于同一请求和同一数据库。"""
         request = self._request(envelope)
         logger.debug(
             "TCP request id=%s body=%s database=%s",
@@ -379,6 +381,7 @@ class EEGDBTCPClient:
         return response
 
     def _request(self, envelope: protocol.Envelope) -> protocol.Envelope:
+        # Envelope 的公共路由字段集中在这里填充，业务方法只构造 oneof 消息体。
         envelope.protocol_version = PROTOCOL_VERSION
         envelope.request_id = self._next_request_id
         envelope.database_id = self.database
@@ -392,6 +395,7 @@ class EEGDBTCPClient:
         if not payload or len(payload) > MAX_FRAME_SIZE:
             raise TCPError(0, f"invalid envelope length {len(payload)}")
         length = struct.pack("<I", len(payload))
+        # CRC 覆盖 magic、长度和 protobuf，服务端可在解析消息前发现传输损坏。
         checksum_input = FRAME_MAGIC + length + payload
         self._sock.sendall(checksum_input + struct.pack("<I", _crc32c(checksum_input)))
 
@@ -417,6 +421,7 @@ class EEGDBTCPClient:
         return envelope
 
     def _read_magic(self) -> None:
+        # 丢帧或读到脏字节时滑动搜索 EDB magic，使后续合法帧仍有机会恢复同步。
         matched = 0
         while matched < len(FRAME_MAGIC):
             value = self._recv_exact(1)[0]
