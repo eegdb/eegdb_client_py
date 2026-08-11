@@ -10,6 +10,7 @@ from eegdb_client.transport.tcp_client import (
     FRAME_MAGIC,
     PROTOCOL_VERSION,
     EEGDBTCPClient,
+    TCPError,
     _crc32c,
 )
 
@@ -31,6 +32,17 @@ class RecordingSocket:
 
 
 class ProtobufFrameTests(unittest.TestCase):
+    def test_password_login_requires_https(self) -> None:
+        client = EEGDBTCPClient(
+            "localhost",
+            9000,
+            username="writer",
+            password="writer-password",
+            http_url="http://localhost:8080",
+        )
+        with self.assertRaisesRegex(TCPError, "HTTPS"):
+            client._login()
+
     def test_edb_frame_round_trip(self) -> None:
         client = EEGDBTCPClient("localhost", 9000)
         request = protocol.Envelope(

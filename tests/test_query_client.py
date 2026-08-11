@@ -97,3 +97,37 @@ def test_query_client_requires_database():
         assert "database is required" in str(exc)
     else:
         raise AssertionError("expected missing database error")
+
+
+def test_query_client_logs_in_over_https_and_sends_bearer(monkeypatch):
+    calls = []
+
+    def fake_urlopen(req, timeout, context=None):
+        calls.append(req)
+        if req.full_url.endswith("/auth/login"):
+            return FakeResponse({"access_token": "short-lived-token"})
+        return FakeResponse({"study_ids": []})
+
+    monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
+    client = EEGDBQueryClient(
+        "https://localhost:8080", username="reader", password="reader-password"
+    )
+
+    assert client.list_studies() == {"study_ids": []}
+    assert json.loads(calls[0].data.decode("utf-8")) == {
+        "username": "reader",
+        "password": "reader-password",
+    }
+    assert calls[1].headers["Authorization"] == "Bearer short-lived-token"
+
+
+def test_query_client_refuses_password_login_over_plain_http():
+    client = EEGDBQueryClient(
+        "http://localhost:8080", username="reader", password="reader-password"
+    )
+    try:
+        client.login()
+    except ValueError as exc:
+        assert "HTTPS" in str(exc)
+    else:
+        raise AssertionError("expected plain HTTP login to be rejected")

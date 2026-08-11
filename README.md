@@ -62,16 +62,17 @@ python -m eegdb_client
 ```
 
 Connect to your EEGDB host, pick a file, set study attributes, then upload or
-download. Host, port, and token name are remembered with `QSettings`; the API
-token secret is not saved.
+download. Host, port, database, and username are remembered with `QSettings`;
+the account password is not saved.
 
-When server auth is enabled, fill in both token name and API token.
+When server auth is enabled, fill in the database account username and password.
+The client logs in over HTTPS, then uses the short-lived token on the TLS TCP connection.
 
 ## CLI
 
 ```bash
 python -m eegdb_client health
-python -m eegdb_client upload recording.edf --lab mylab --paradigm resting
+python -m eegdb_client --username uploader --password 'ACCOUNT_PASSWORD' upload recording.edf --lab mylab --paradigm resting
 python -m eegdb_client upload recording.cdt --lab mylab
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
@@ -96,8 +97,9 @@ Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt`, `.ceo`,
 FLOAT channels are uploaded as-is over TCP. Compression, including `uv0.1`
 lossy FLOAT compression, is configured on the EEGDB server.
 
-Common options: `--host`, `--port`, `--database`, `--token-name`,
-`--api-token`, `-v`.
+Common options: `--host`, `--port`, `--database`, `--http-url`, `--username`,
+`--password`, and `-v`. Use `--insecure-skip-tls-verify` only with a local
+self-signed development certificate.
 
 ## Logs
 
@@ -109,8 +111,8 @@ On Linux the default is typically:
 ```
 
 Use `-v` for debug-level CLI and file logs, or `--log-file PATH` to select a
-different CLI log file. Logs rotate at 5 MiB and retain three backups. API
-token secrets are never logged.
+different CLI log file. Logs rotate at 5 MiB and retain three backups. Account
+passwords and access tokens are never logged.
 
 ## Epoch analysis helper
 
@@ -122,9 +124,11 @@ token secrets are never logged.
 from eegdb_client import EEGDBEpochs
 
 epochs = EEGDBEpochs.from_http(
-    "http://localhost:8080",
+    "https://localhost:8080",
     "STUDY_ID",
     database="default",
+    username="reader",
+    password="ACCOUNT_PASSWORD",
     channels=[0, 1],
     event_type="stimulus",
     code="target",
@@ -148,7 +152,12 @@ Uploads and downloads use TCP. For analysis and admin reads, use
 ```python
 from eegdb_client import EEGDBQueryClient
 
-client = EEGDBQueryClient("http://localhost:8080", database="default")
+client = EEGDBQueryClient(
+    "https://localhost:8080",
+    database="default",
+    username="reader",
+    password="ACCOUNT_PASSWORD",
+)
 
 studies = client.list_studies()
 study = client.get_study("STUDY_ID")
@@ -166,14 +175,11 @@ status = client.get_job(job["job_id"])
 
 ## Authentication
 
-EEGDB TCP uses challenge-response auth; plaintext tokens are never sent on the
-wire.
-
-After handshake, the server may send a 32-byte nonce. The client replies with
-`MsgAuthProof` using `SHA256(SHA256(secret) || nonce)`.
-
-Clients need both token name (public identifier) and token secret (shown once at
-creation).
+EEGDB uses database accounts and TLS. The client posts the username and password
+to `https://HOST:HTTP_PORT/api/v1/databases/{database}/auth/login`, receives a
+short-lived access token, then sends it as `AuthRequest.access_token` on the TLS
+TCP connection. Tokens expire, stop working immediately when the account is
+disabled, and cannot be reused with another database.
 
 ## Build standalone app
 

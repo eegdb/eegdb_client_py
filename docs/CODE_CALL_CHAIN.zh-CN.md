@@ -39,7 +39,7 @@ CLI/GUI 选择文件
   → _exchange 校验 request_id/database_id 和 error_response
 ```
 
-连接时先发送 handshake。若服务端返回 nonce 且要求认证，客户端发送 `SHA256(SHA256(secret) || nonce)` 证明，不在网络上传输 token 明文。
+连接前先通过对应数据库的 HTTPS 登录接口提交账户密码，取得短期 token。TCP 使用 TLS；发送 handshake 后若服务端要求认证，客户端在 `AuthRequest.access_token` 中提交该 token。
 
 ## 4. 下载
 
@@ -72,4 +72,3 @@ Epoch 还可通过 `EEGDBEpochs.from_http` 或 `from_server` 获取，结果组�
 ## 7. 生成文件
 
 `eegdb_client/protocol/v1/protocol_pb2.py` 来自服务端 Protobuf schema，不应手工编辑。协议升级时必须同步服务端 schema、Go/Python 生成物和帧兼容性测试。
-

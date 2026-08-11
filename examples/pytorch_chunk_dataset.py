@@ -16,11 +16,11 @@ try:
 except ImportError as exc:
     raise SystemExit("Install PyTorch first: pip install torch") from exc
 
-THIS_DIR = pathlib.Path(__file__).resolve().parent
-if str(THIS_DIR) not in sys.path:
-    sys.path.insert(0, str(THIS_DIR))
+PROJECT_DIR = pathlib.Path(__file__).resolve().parents[1]
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
-from http_api_demo import EEGDBClient  # noqa: E402
+from eegdb_client import EEGDBQueryClient  # noqa: E402
 
 
 class EEGChunkDataset(Dataset):
@@ -28,7 +28,7 @@ class EEGChunkDataset(Dataset):
 
     def __init__(
         self,
-        client: EEGDBClient,
+        client: EEGDBQueryClient,
         study_id: str,
         channel_id: int,
         window_samples: int,
@@ -81,7 +81,7 @@ class EEGChunkDataset(Dataset):
 
 
 def iter_batches(
-    client: EEGDBClient,
+    client: EEGDBQueryClient,
     study_id: str,
     channel_id: int,
     window_samples: int,
@@ -98,17 +98,25 @@ def iter_batches(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="EEGDB PyTorch chunk demo")
-    parser.add_argument("--server", default="http://localhost:8080")
+    parser.add_argument("--server", default="https://localhost:8080")
+    parser.add_argument("--database", default="default")
+    parser.add_argument("--username", required=True)
+    parser.add_argument("--password", required=True)
+    parser.add_argument("--insecure-skip-tls-verify", action="store_true")
     parser.add_argument("--study-id", required=True)
     parser.add_argument("--channel", type=int, default=0)
     parser.add_argument("--window", type=int, default=512)
     parser.add_argument("--stride", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--token-name", default="")
-    parser.add_argument("--api-token", default="")
     args = parser.parse_args()
 
-    client = EEGDBClient(args.server, token_name=args.token_name, api_token=args.api_token)
+    client = EEGDBQueryClient(
+        args.server,
+        database=args.database,
+        username=args.username,
+        password=args.password,
+        tls_verify=not args.insecure_skip_tls_verify,
+    )
     dataset = EEGChunkDataset(
         client,
         args.study_id,

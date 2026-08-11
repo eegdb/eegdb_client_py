@@ -32,6 +32,8 @@ class EEGDBQueryClient:
         self.username, self.password, self.access_token, self.tls_verify = username, password, access_token, tls_verify
 
     def login(self) -> str:
+        if not self.base_url.startswith("https://"):
+            raise ValueError("HTTPS is required for account login")
         data = json.dumps({"username": self.username, "password": self.password}).encode("utf-8")
         req = Request(f"{self.base_url}{self.api_base}/auth/login", data=data, headers={"Content-Type": "application/json"}, method="POST")
         with self._open(req) as resp:

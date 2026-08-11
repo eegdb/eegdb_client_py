@@ -66,7 +66,7 @@ class EEGDBTCPClient:
         return self._sock is not None
 
     def connect(self) -> None:
-        """建立 TCP 会话，并在服务端要求时完成 challenge-response 认证。"""
+        """建立 TLS TCP 会话，并在服务端要求时提交短期访问 token。"""
         logger.info(
             "connecting to EEGDB host=%s port=%s database=%s",
             self.host,
@@ -124,6 +124,8 @@ class EEGDBTCPClient:
     def _login(self) -> str:
         if not self.http_url:
             raise TCPError(0, "http_url is required for username/password login")
+        if not self.http_url.startswith("https://"):
+            raise TCPError(0, "HTTPS is required for username/password login")
         body = json.dumps({"username": self.username, "password": self.password}).encode("utf-8")
         url = f"{self.http_url}/api/v1/databases/{self.database}/auth/login"
         context = ssl.create_default_context()
