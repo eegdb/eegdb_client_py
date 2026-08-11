@@ -65,7 +65,7 @@ Connect to your EEGDB host, pick a file, set study attributes, then upload or
 download. Host, port, database, and username are remembered with `QSettings`;
 the account password is not saved.
 
-When server auth is enabled, fill in the database account username and password.
+When server auth is enabled, fill in the global account username and password.
 The client logs in over HTTPS, then uses the short-lived token on the TLS TCP connection.
 
 ## CLI
@@ -175,27 +175,14 @@ status = client.get_job(job["job_id"])
 
 ## Authentication
 
-EEGDB uses database accounts and TLS. The client posts the username and password
-to `https://HOST:HTTP_PORT/api/v1/databases/{database}/auth/login`, receives a
+EEGDB uses global accounts and TLS. The client posts the username and password
+to `https://HOST:HTTP_PORT/api/v1/auth/login`, receives a
 short-lived access token, then sends it as `AuthRequest.access_token` on the TLS
 TCP connection. Tokens expire and stop working immediately when the account is
-disabled. Read/write tokens cannot be reused with another database; admin
-tokens can access every database and process-management interface.
-
-When an administrator account belongs to the process scope (recommended), set
-`auth_scope="process"` while keeping `database` as the target database:
-
-```python
-client = EEGDBQueryClient(
-    "https://localhost:8080",
-    database="lab",
-    auth_scope="process",
-    username="process-admin",
-    password="ACCOUNT_PASSWORD",
-)
-```
-
-The command-line equivalent is `--database lab --auth-scope process`.
+disabled. User identities are global, while ordinary users receive read or
+write permission per database. Administrators can access every database and
+all process/account-management interfaces. Grant changes affect existing
+tokens immediately.
 
 ## Build standalone app
 

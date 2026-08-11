@@ -121,7 +121,7 @@ def test_query_client_logs_in_over_https_and_sends_bearer(monkeypatch):
     assert calls[1].headers["Authorization"] == "Bearer short-lived-token"
 
 
-def test_query_client_can_login_with_process_admin(monkeypatch):
+def test_query_client_uses_global_login_endpoint(monkeypatch):
     calls = []
 
     def fake_urlopen(req, timeout, context=None):
@@ -132,13 +132,12 @@ def test_query_client_can_login_with_process_admin(monkeypatch):
     client = EEGDBQueryClient(
         "https://localhost:8080",
         database="lab",
-        auth_scope="process",
         username="admin",
         password="admin-password",
     )
 
     assert client.login() == "global-admin-token"
-    assert calls[0].full_url == "https://localhost:8080/api/v1/process/auth/login"
+    assert calls[0].full_url == "https://localhost:8080/api/v1/auth/login"
 
 
 def test_query_client_refuses_password_login_over_plain_http():

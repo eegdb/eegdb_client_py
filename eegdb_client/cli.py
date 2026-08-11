@@ -22,7 +22,6 @@ def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
         database=args.database,
         username=args.username,
         password=args.password,
-        auth_scope=args.auth_scope,
         http_url=args.http_url,
         tls_verify=not args.insecure_skip_tls_verify,
     )
@@ -94,11 +93,6 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--http-url", default="https://127.0.0.1:8080", help="HTTPS login endpoint")
     parser.add_argument("--username", default="", help="Account username")
     parser.add_argument("--password", default="", help="Account password")
-    parser.add_argument(
-        "--auth-scope",
-        default="",
-        help="login account scope: process or a database name (default: target database)",
-    )
     parser.add_argument("--insecure-skip-tls-verify", action="store_true", help="development only")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument(

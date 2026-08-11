@@ -33,12 +33,11 @@ class RecordingSocket:
 
 
 class ProtobufFrameTests(unittest.TestCase):
-    def test_process_admin_login_scope(self) -> None:
+    def test_global_account_login(self) -> None:
         client = EEGDBTCPClient(
             "localhost",
             9000,
             database="lab",
-            auth_scope="process",
             username="admin",
             password="admin-password",
             http_url="https://localhost:8080",
@@ -49,7 +48,7 @@ class ProtobufFrameTests(unittest.TestCase):
         with patch("eegdb_client.transport.tcp_client.urlopen", return_value=response) as urlopen_mock:
             self.assertEqual(client._login(), "global-admin-token")
         request = urlopen_mock.call_args.args[0]
-        self.assertEqual(request.full_url, "https://localhost:8080/api/v1/process/auth/login")
+        self.assertEqual(request.full_url, "https://localhost:8080/api/v1/auth/login")
 
     def test_password_login_requires_https(self) -> None:
         client = EEGDBTCPClient(
