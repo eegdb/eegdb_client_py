@@ -20,8 +20,10 @@ def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
         args.host,
         args.port,
         database=args.database,
-        token_name=args.token_name,
-        api_token=args.api_token,
+        username=args.username,
+        password=args.password,
+        http_url=args.http_url,
+        tls_verify=not args.insecure_skip_tls_verify,
     )
 
 
@@ -88,8 +90,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--database", default="default", help="Database name (default: default)")
-    parser.add_argument("--token-name", default="", help="API token name (when server auth enabled)")
-    parser.add_argument("--api-token", default="", help="API token secret (when server auth enabled)")
+    parser.add_argument("--http-url", default="https://127.0.0.1:8080", help="HTTPS login endpoint")
+    parser.add_argument("--username", default="", help="Account username")
+    parser.add_argument("--password", default="", help="Account password")
+    parser.add_argument("--insecure-skip-tls-verify", action="store_true", help="development only")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument(
         "--log-file",

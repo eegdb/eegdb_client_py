@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -12,11 +13,14 @@ class EEGDBQueryClient:
     """Small notebook-friendly HTTP client for EEGDB read/query APIs."""
 
     def __init__(
-        self,
-        base_url: str = "http://127.0.0.1:8080",
+        self, base_url: str = "https://127.0.0.1:8080",
         *,
         database: str = "default",
         timeout: float = 120,
+        username: str = "",
+        password: str = "",
+        access_token: str = "",
+        tls_verify: bool = True,
     ):
         self.base_url = base_url.rstrip("/")
         database = database.strip()
@@ -25,6 +29,14 @@ class EEGDBQueryClient:
         self.database = database
         self.api_base = f"/api/v1/databases/{quote(database, safe='')}"
         self.timeout = timeout
+        self.username, self.password, self.access_token, self.tls_verify = username, password, access_token, tls_verify
+
+    def login(self) -> str:
+        data = json.dumps({"username": self.username, "password": self.password}).encode("utf-8")
+        req = Request(f"{self.base_url}{self.api_base}/auth/login", data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with self._open(req) as resp:
+            self.access_token = json.loads(resp.read().decode("utf-8"))["access_token"]
+        return self.access_token
 
     def list_studies(self) -> Dict[str, Any]:
         return self._request("GET", "/api/v1/studies")
@@ -168,16 +180,28 @@ class EEGDBQueryClient:
         if query:
             url = f"{url}?{query}"
         data = None
+        if not self.access_token and self.username and self.password: self.login()
         headers = {"Accept": "application/json"}
+        if self.access_token: headers["Authorization"] = f"Bearer {self.access_token}"
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
         req = Request(url, data=data, headers=headers, method=method)
-        with urlopen(req, timeout=self.timeout) as resp:
+        with self._open(req) as resp:
             payload = resp.read()
         if not payload:
             return {}
         return json.loads(payload.decode("utf-8"))
+
+    def _ssl_context(self):
+        context = ssl.create_default_context()
+        if not self.tls_verify: context.check_hostname = False; context.verify_mode = ssl.CERT_NONE
+        return context
+
+    def _open(self, request: Request):
+        if self.base_url.startswith("https://"):
+            return urlopen(request, timeout=self.timeout, context=self._ssl_context())
+        return urlopen(request, timeout=self.timeout)
 
 
 def encode_params(params: Mapping[str, Any]) -> str:

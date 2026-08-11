@@ -63,17 +63,17 @@ class ConnectPage(QWidget):
         self.database_edit.setClearButtonEnabled(True)
 
         self.token_name_edit = LineEdit()
-        self.token_name_edit.setPlaceholderText("optional")
+        self.token_name_edit.setPlaceholderText("account username")
         self.token_name_edit.setClearButtonEnabled(True)
 
         self.api_token_edit = PasswordLineEdit()
-        self.api_token_edit.setPlaceholderText("optional — not saved to disk")
+        self.api_token_edit.setPlaceholderText("account password — not saved to disk")
 
         form.addRow(BodyLabel("Host"), self.host_edit)
         form.addRow(BodyLabel("Port"), self.port_spin)
         form.addRow(BodyLabel("Database"), self.database_edit)
-        form.addRow(BodyLabel("Token name"), self.token_name_edit)
-        form.addRow(BodyLabel("API token"), self.api_token_edit)
+        form.addRow(BodyLabel("Username"), self.token_name_edit)
+        form.addRow(BodyLabel("Password"), self.api_token_edit)
         card_layout.addLayout(form)
 
         self.status_label = StrongBodyLabel("Not connected")
@@ -156,8 +156,9 @@ class ConnectPage(QWidget):
             host,
             port,
             database=database,
-            token_name=self.token_name_edit.text().strip(),
-            api_token=self.api_token_edit.text().strip(),
+            username=self.token_name_edit.text().strip(),
+            password=self.api_token_edit.text().strip(),
+            http_url=f"https://{host}:8080",
         )
         try:
             client.connect()
