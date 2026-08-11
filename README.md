@@ -178,8 +178,24 @@ status = client.get_job(job["job_id"])
 EEGDB uses database accounts and TLS. The client posts the username and password
 to `https://HOST:HTTP_PORT/api/v1/databases/{database}/auth/login`, receives a
 short-lived access token, then sends it as `AuthRequest.access_token` on the TLS
-TCP connection. Tokens expire, stop working immediately when the account is
-disabled, and cannot be reused with another database.
+TCP connection. Tokens expire and stop working immediately when the account is
+disabled. Read/write tokens cannot be reused with another database; admin
+tokens can access every database and process-management interface.
+
+When an administrator account belongs to the process scope (recommended), set
+`auth_scope="process"` while keeping `database` as the target database:
+
+```python
+client = EEGDBQueryClient(
+    "https://localhost:8080",
+    database="lab",
+    auth_scope="process",
+    username="process-admin",
+    password="ACCOUNT_PASSWORD",
+)
+```
+
+The command-line equivalent is `--database lab --auth-scope process`.
 
 ## Build standalone app
 

@@ -8,6 +8,7 @@ import socket
 import ssl
 import struct
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -44,6 +45,7 @@ class EEGDBTCPClient:
         username: str = "",
         password: str = "",
         access_token: str = "",
+        auth_scope: str = "",
         http_url: str = "",
         tls_verify: bool = True,
     ):
@@ -56,6 +58,7 @@ class EEGDBTCPClient:
         self.username = username
         self.password = password
         self.access_token = access_token
+        self.auth_scope = auth_scope.strip() or self.database
         self.http_url = http_url.rstrip("/")
         self.tls_verify = tls_verify
         self._sock: Optional[socket.socket] = None
@@ -127,7 +130,11 @@ class EEGDBTCPClient:
         if not self.http_url.startswith("https://"):
             raise TCPError(0, "HTTPS is required for username/password login")
         body = json.dumps({"username": self.username, "password": self.password}).encode("utf-8")
-        url = f"{self.http_url}/api/v1/databases/{self.database}/auth/login"
+        if self.auth_scope == "process":
+            login_path = "/api/v1/process/auth/login"
+        else:
+            login_path = f"/api/v1/databases/{quote(self.auth_scope, safe='')}/auth/login"
+        url = f"{self.http_url}{login_path}"
         context = ssl.create_default_context()
         if not self.tls_verify:
             context.check_hostname = False

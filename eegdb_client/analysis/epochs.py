@@ -77,6 +77,7 @@ class EEGDBEpochs:
         username: str = "",
         password: str = "",
         access_token: str = "",
+        auth_scope: str = "",
         tls_verify: bool = True,
     ) -> "EEGDBEpochs":
         from ..query_client import EEGDBQueryClient
@@ -88,6 +89,7 @@ class EEGDBEpochs:
             username=username,
             password=password,
             access_token=access_token,
+            auth_scope=auth_scope,
             tls_verify=tls_verify,
         )
         return cls.from_server(

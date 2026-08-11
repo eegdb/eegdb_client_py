@@ -20,6 +20,7 @@ class EEGDBQueryClient:
         username: str = "",
         password: str = "",
         access_token: str = "",
+        auth_scope: str = "",
         tls_verify: bool = True,
     ):
         self.base_url = base_url.rstrip("/")
@@ -29,13 +30,18 @@ class EEGDBQueryClient:
         self.database = database
         self.api_base = f"/api/v1/databases/{quote(database, safe='')}"
         self.timeout = timeout
+        self.auth_scope = auth_scope.strip() or database
         self.username, self.password, self.access_token, self.tls_verify = username, password, access_token, tls_verify
 
     def login(self) -> str:
         if not self.base_url.startswith("https://"):
             raise ValueError("HTTPS is required for account login")
         data = json.dumps({"username": self.username, "password": self.password}).encode("utf-8")
-        req = Request(f"{self.base_url}{self.api_base}/auth/login", data=data, headers={"Content-Type": "application/json"}, method="POST")
+        if self.auth_scope == "process":
+            login_path = "/api/v1/process/auth/login"
+        else:
+            login_path = f"/api/v1/databases/{quote(self.auth_scope, safe='')}/auth/login"
+        req = Request(f"{self.base_url}{login_path}", data=data, headers={"Content-Type": "application/json"}, method="POST")
         with self._open(req) as resp:
             self.access_token = json.loads(resp.read().decode("utf-8"))["access_token"]
         return self.access_token

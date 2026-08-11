@@ -4,6 +4,7 @@ import struct
 import unittest
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from eegdb_client.protocol.v1 import protocol_pb2 as protocol
 from eegdb_client.transport.tcp_client import (
@@ -32,6 +33,24 @@ class RecordingSocket:
 
 
 class ProtobufFrameTests(unittest.TestCase):
+    def test_process_admin_login_scope(self) -> None:
+        client = EEGDBTCPClient(
+            "localhost",
+            9000,
+            database="lab",
+            auth_scope="process",
+            username="admin",
+            password="admin-password",
+            http_url="https://localhost:8080",
+        )
+        response = MagicMock()
+        response.read.return_value = b'{"access_token":"global-admin-token"}'
+        response.__enter__.return_value = response
+        with patch("eegdb_client.transport.tcp_client.urlopen", return_value=response) as urlopen_mock:
+            self.assertEqual(client._login(), "global-admin-token")
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(request.full_url, "https://localhost:8080/api/v1/process/auth/login")
+
     def test_password_login_requires_https(self) -> None:
         client = EEGDBTCPClient(
             "localhost",
