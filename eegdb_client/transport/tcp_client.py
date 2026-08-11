@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
+import json
 import socket
+import ssl
 import struct
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.request import Request, urlopen
 
 import numpy as np
 
-from ..auth_proof import compute_proof
 from ..models import DT_FLOAT32, DT_FLOAT64, DT_INT16, DT_INT24, DT_INT64, Event
 from ..protocol.v1 import protocol_pb2 as protocol
 
@@ -39,8 +41,11 @@ class EEGDBTCPClient:
         *,
         database: str = "default",
         client_name: str = "eegdb-client",
-        token_name: str = "",
-        api_token: str = "",
+        username: str = "",
+        password: str = "",
+        access_token: str = "",
+        http_url: str = "",
+        tls_verify: bool = True,
     ):
         self.host = host
         self.port = port
@@ -48,8 +53,11 @@ class EEGDBTCPClient:
         if not self.database:
             raise ValueError("database is required")
         self.client_name = client_name
-        self.token_name = token_name
-        self.api_token = api_token
+        self.username = username
+        self.password = password
+        self.access_token = access_token
+        self.http_url = http_url.rstrip("/")
+        self.tls_verify = tls_verify
         self._sock: Optional[socket.socket] = None
         self._next_request_id = 1
 
@@ -66,7 +74,14 @@ class EEGDBTCPClient:
             self.database,
         )
         self.close()
-        sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT)
+        if not self.access_token and self.username and self.password:
+            self.access_token = self._login()
+        raw_sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT)
+        context = ssl.create_default_context()
+        if not self.tls_verify:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        sock = context.wrap_socket(raw_sock, server_hostname=self.host)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         sock.settimeout(IO_TIMEOUT)
         self._sock = sock
@@ -80,14 +95,11 @@ class EEGDBTCPClient:
                 raise TCPError(0, f"expected handshake_response, got {response.WhichOneof('body')}")
             handshake = response.handshake_response
             if handshake.auth_required:
-                if not self.api_token or not self.token_name:
-                    raise TCPError(0, "server requires auth; provide token_name and api_token")
+                if not self.access_token:
+                    raise TCPError(0, "server requires auth; log in first to obtain an access token")
                 auth = self._exchange(
                     protocol.Envelope(
-                        auth_request=protocol.AuthRequest(
-                            token_name=self.token_name,
-                            proof=compute_proof(self.api_token, handshake.nonce),
-                        )
+                        auth_request=protocol.AuthRequest(access_token=self.access_token)
                     )
                 )
                 if not auth.HasField("auth_response") or not auth.auth_response.authenticated:
@@ -108,6 +120,24 @@ class EEGDBTCPClient:
             )
             self.close()
             raise
+
+    def _login(self) -> str:
+        if not self.http_url:
+            raise TCPError(0, "http_url is required for username/password login")
+        body = json.dumps({"username": self.username, "password": self.password}).encode("utf-8")
+        url = f"{self.http_url}/api/v1/databases/{self.database}/auth/login"
+        context = ssl.create_default_context()
+        if not self.tls_verify:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        try:
+            with urlopen(Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST"), timeout=CONNECT_TIMEOUT, context=context) as response:
+                token = json.loads(response.read().decode("utf-8")).get("access_token", "")
+        except Exception as exc:
+            raise TCPError(0, f"login failed: {exc}") from exc
+        if not isinstance(token, str) or not token:
+            raise TCPError(0, "login response did not contain access_token")
+        return token
 
     def close(self) -> None:
         sock = self._sock
