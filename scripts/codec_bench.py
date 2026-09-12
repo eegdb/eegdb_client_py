@@ -22,7 +22,7 @@ from eegdb_client.upload.pipeline import upload_source_file
 EEGDB = Path("/home/qiushui/db/EEGDB")
 CDT = "/mnt/d/EEGData/Control_Sub726/Control_Sub726/Experiment1_ABT/ABT_EEG/Sub726_ABT_EEG.cdt"
 BASE = Path("/tmp/eegdb_codec_bench")
-CODECS = ["lz4", "zstd", "flac", "wavpack", "best"]
+CODECS = ["lz4", "zstd", "flac", "wavpack", "fast", "balanced", "smallest"]
 BPS = {0x01: 2, 0x02: 4, 0x03: 4, 0x04: 8}
 
 

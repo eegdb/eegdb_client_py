@@ -5,9 +5,11 @@ from __future__ import annotations
 import unittest
 
 from eegdb_client.codec_local import (
-    BLOCK_CODEC_BEST,
+    BLOCK_CODEC_BALANCED,
+    BLOCK_CODEC_FAST,
     BLOCK_CODEC_FLAC,
     BLOCK_CODEC_LZ4,
+    BLOCK_CODEC_SMALLEST,
     BLOCK_CODEC_WAVPACK,
     BLOCK_CODEC_ZSTD,
     parse_block_codec,
@@ -21,8 +23,10 @@ class BlockCodecParseTests(unittest.TestCase):
         self.assertEqual(parse_block_codec("zstd"), BLOCK_CODEC_ZSTD)
         self.assertEqual(parse_block_codec("flac"), BLOCK_CODEC_FLAC)
         self.assertEqual(parse_block_codec("wavpack"), BLOCK_CODEC_WAVPACK)
-        self.assertEqual(parse_block_codec("best"), BLOCK_CODEC_BEST)
-        self.assertEqual(parse_block_codec(""), BLOCK_CODEC_BEST)
+        self.assertEqual(parse_block_codec("fast"), BLOCK_CODEC_FAST)
+        self.assertEqual(parse_block_codec("balanced"), BLOCK_CODEC_BALANCED)
+        self.assertEqual(parse_block_codec("smallest"), BLOCK_CODEC_SMALLEST)
+        self.assertEqual(parse_block_codec(""), BLOCK_CODEC_BALANCED)
 
     def test_unknown(self) -> None:
         with self.assertRaises(ValueError):

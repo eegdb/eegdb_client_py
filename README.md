@@ -89,7 +89,7 @@ python -m eegdb_client download <study_id> \
 ```
 
 `--codec` selects the server-side block codec used to re-encode each batch:
-`lz4`, `zstd`, `flac`, `wavpack`, or `best`.
+`lz4`, `zstd`, `flac`, `wavpack`, `fast`, `balanced`, or `smallest`.
 
 Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt`, `.ceo`,
 `.dap`, `.rs3`, `.rs4`).

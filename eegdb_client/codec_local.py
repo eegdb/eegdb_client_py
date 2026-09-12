@@ -5,7 +5,7 @@ eegdb_codec Python package (ctypes over libeegdbcodec), which mirrors
 pkg/codec.DecodeRaw.
 
 BlockCodec IDs on the wire match Go internal/codec/block.BlockCodec:
-  0=lz4, 1=zstd, 2=flac, 3=wavpack, 4=best
+  0=lz4, 1=zstd, 2=flac, 3=wavpack, 4=fast, 5=balanced, 6=smallest
 """
 
 from __future__ import annotations
@@ -19,22 +19,26 @@ BLOCK_CODEC_LZ4 = 0
 BLOCK_CODEC_ZSTD = 1
 BLOCK_CODEC_FLAC = 2
 BLOCK_CODEC_WAVPACK = 3
-BLOCK_CODEC_BEST = 4
+BLOCK_CODEC_FAST = 4
+BLOCK_CODEC_BALANCED = 5
+BLOCK_CODEC_SMALLEST = 6
 
 _BLOCK_CODEC_BY_NAME = {
     "lz4": BLOCK_CODEC_LZ4,
     "zstd": BLOCK_CODEC_ZSTD,
     "flac": BLOCK_CODEC_FLAC,
     "wavpack": BLOCK_CODEC_WAVPACK,
-    "best": BLOCK_CODEC_BEST,
-    "": BLOCK_CODEC_BEST,
+    "fast": BLOCK_CODEC_FAST,
+    "balanced": BLOCK_CODEC_BALANCED,
+    "smallest": BLOCK_CODEC_SMALLEST,
+    "": BLOCK_CODEC_BALANCED,
 }
 
 
 def parse_block_codec(name: str) -> int:
-    key = (name or "best").strip().lower()
+    key = (name or "balanced").strip().lower()
     if key not in _BLOCK_CODEC_BY_NAME:
-        raise ValueError(f"unknown block codec {name!r} (want lz4|zstd|flac|wavpack|best)")
+        raise ValueError(f"unknown block codec {name!r} (want lz4|zstd|flac|wavpack|fast|balanced|smallest)")
     return _BLOCK_CODEC_BY_NAME[key]
 
 

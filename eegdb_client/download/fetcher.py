@@ -27,7 +27,7 @@ def download_study(
     on_progress: Optional[ProgressCallback] = None,
     *,
     local_decode: bool = False,
-    block_codec: str = "best",
+    block_codec: str = "balanced",
 ) -> str:
     """Download a study to a local file.
 

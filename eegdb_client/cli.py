@@ -133,9 +133,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_dl.add_argument(
         "--codec",
-        default="best",
-        choices=["lz4", "zstd", "flac", "wavpack", "best"],
-        help="block codec for --local-decode (server re-encodes the batch; default: best)",
+        default="balanced",
+        choices=["lz4", "zstd", "flac", "wavpack", "fast", "balanced", "smallest"],
+        help="block codec for --local-decode (server re-encodes the batch; default: balanced)",
     )
     p_dl.set_defaults(func=cmd_download)
 

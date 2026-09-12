@@ -106,7 +106,7 @@ class BrowsePage(QWidget):
 
         self.local_decode_cb = CheckBox("Local decode (eegdb-codec)")
         self.codec_combo = ComboBox()
-        self.codec_combo.addItems(["best", "lz4", "zstd", "flac", "wavpack"])
+        self.codec_combo.addItems(["balanced", "fast", "smallest", "lz4", "zstd", "flac", "wavpack"])
         self.codec_combo.setEnabled(False)
         self.local_decode_cb.toggled.connect(self.codec_combo.setEnabled)
         dl_row.addWidget(self.local_decode_cb)
