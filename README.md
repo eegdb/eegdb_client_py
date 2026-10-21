@@ -4,6 +4,16 @@ Python TCP client for [EEGDB](https://github.com/eegdb/eegdb): Fluent-design
 PyQt6 desktop GUI and CLI for EDF/BDF/FIF/CDT upload and download, plus
 notebook-friendly epoch analysis helpers.
 
+## License
+
+This repository is licensed under [Apache License 2.0](LICENSE) (SPDX:
+`Apache-2.0`), which permits commercial and non-commercial use, modification,
+and redistribution under its terms. The desktop GUI depends on
+PyQt6-Fluent-Widgets (GPLv3); distributing a combined GUI binary must also
+follow that dependency's license requirements. The bundled codec also includes
+WavPack components under BSD 3-Clause; see
+[THIRD_PARTY_LICENSES/WAVPACK-LICENSE](THIRD_PARTY_LICENSES/WAVPACK-LICENSE).
+
 ## Project layout
 
 ```text

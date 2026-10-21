@@ -6,6 +6,8 @@ from PyInstaller.utils.hooks import collect_all
 PROJECT_ROOT = os.path.abspath(SPECPATH)
 
 datas = []
+datas.append((os.path.join(PROJECT_ROOT, 'LICENSE'), '.'))
+datas.append((os.path.join(PROJECT_ROOT, 'THIRD_PARTY_LICENSES', 'WAVPACK-LICENSE'), 'THIRD_PARTY_LICENSES'))
 binaries = []
 hiddenimports = [
     'eegdb_client',

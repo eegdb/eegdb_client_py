@@ -41,6 +41,8 @@ if (-not (Test-PythonImport "eegdb_codec")) {
 Write-Host "Running PyInstaller..."
 pyinstaller --noconfirm --clean --windowed `
   --name EEGDBClient `
+  --add-data "$Root\LICENSE;." `
+  --add-data "$Root\THIRD_PARTY_LICENSES\WAVPACK-LICENSE;THIRD_PARTY_LICENSES" `
   --paths $Root `
   --hidden-import eegdb_client `
   --hidden-import eegdb_codec `

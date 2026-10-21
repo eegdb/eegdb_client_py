@@ -22,6 +22,8 @@ fi
 
 pyinstaller --noconfirm --clean --windowed \
   --name EEGDBClient \
+  --add-data "${ROOT}/LICENSE:." \
+  --add-data "${ROOT}/THIRD_PARTY_LICENSES/WAVPACK-LICENSE:THIRD_PARTY_LICENSES" \
   --paths "${ROOT}" \
   --hidden-import eegdb_client \
   --hidden-import eegdb_codec \
