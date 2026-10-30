@@ -51,7 +51,9 @@ class UploadPage(QWidget):
 
         file_row = QHBoxLayout()
         self.file_edit = LineEdit()
-        self.file_edit.setPlaceholderText("Path to .edf / .bdf / .fif / .cdt …")
+        self.file_edit.setPlaceholderText(
+            "Path to .edf / .bdf / .fif / .cdt / .vhdr / .set / .xdf …"
+        )
         self.file_edit.setClearButtonEnabled(True)
         self.file_edit.textChanged.connect(self._on_file_path_changed)
         browse_btn = PushButton("Browse…")
@@ -98,7 +100,7 @@ class UploadPage(QWidget):
             self,
             "Select EEG file",
             "",
-            "EEG files (*.edf *.bdf *.fif *.cdt *.ceo *.dap *.rs3 *.rs4)",
+            "EEG files (*.edf *.bdf *.fif *.cdt *.ceo *.dap *.rs3 *.rs4 *.vhdr *.set *.xdf)",
         )
         if path:
             self.file_edit.setText(path)

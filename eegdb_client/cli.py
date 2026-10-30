@@ -9,7 +9,8 @@ from pathlib import Path
 from .download.fetcher import download_study
 from .logging_config import configure_logging, install_exception_hook
 from .models import StudyAttrs
-from .readers import load_source_file
+from .readers import load_source_file, record_lsl
+from .readers.bids import attach_bids_events, discover_bids_recordings
 from .transport.tcp_client import EEGDBTCPClient
 from .upload.pipeline import upload_source_file
 
@@ -86,7 +87,7 @@ def cmd_import_dir(args: argparse.Namespace) -> None:
     root = Path(args.directory).expanduser()
     if not root.is_dir():
         raise SystemExit(f"directory not found: {root}")
-    allowed = {".edf", ".bdf", ".fif", ".cdt"}
+    allowed = {".edf", ".bdf", ".fif", ".cdt", ".vhdr", ".set", ".xdf"}
     iterator = root.rglob("*") if args.recursive else root.glob("*")
     paths = sorted(path for path in iterator if path.is_file() and path.suffix.lower() in allowed)
     if not paths:
@@ -115,6 +116,43 @@ def cmd_import_dir(args: argparse.Namespace) -> None:
         raise SystemExit(f"{len(failures)} of {len(paths)} imports failed; rerun to resume")
 
 
+def cmd_import_bids(args: argparse.Namespace) -> None:
+    try:
+        recordings = discover_bids_recordings(args.directory)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not recordings:
+        raise SystemExit(f"no supported EEG recordings found in {args.directory}")
+
+    failures = []
+    for index, recording in enumerate(recordings, 1):
+        print(f"[{index}/{len(recordings)}] {recording.path}")
+        attrs = recording.attrs
+        attrs.lab = args.lab
+        attrs.device_type = args.device
+        try:
+            with _tcp_client(args) as client:
+                source = attach_bids_events(
+                    load_source_file(str(recording.path)), recording.path
+                )
+                study_id = upload_source_file(
+                    client,
+                    source,
+                    attrs,
+                    batch_seconds=args.batch_seconds,
+                    resume=not args.no_resume,
+                )
+            print(f"  uploaded {study_id}")
+        except Exception as exc:
+            logger.exception("BIDS import failed: %s", recording.path)
+            failures.append((recording.path, exc))
+            print(f"  failed: {exc}")
+    if failures:
+        raise SystemExit(
+            f"{len(failures)} of {len(recordings)} BIDS imports failed; rerun to resume"
+        )
+
+
 def cmd_export(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +177,19 @@ def cmd_export(args: argparse.Namespace) -> None:
             print(f"  failed: {exc}")
     if failures:
         raise SystemExit(f"{len(failures)} of {len(args.study_ids)} exports failed")
+
+
+def cmd_upload_lsl(args: argparse.Namespace) -> None:
+    source = record_lsl(
+        args.duration,
+        stream_name=args.stream_name,
+        stream_type=args.stream_type,
+        resolve_timeout=args.resolve_timeout,
+    )
+    attrs = StudyAttrs(lab=args.lab, paradigm=args.paradigm, device_type="LSL")
+    with _tcp_client(args) as client:
+        study_id = upload_source_file(client, source, attrs, resume=False)
+    print(study_id)
 
 
 def cmd_health(args: argparse.Namespace) -> None:
@@ -167,7 +218,9 @@ def main(argv: list[str] | None = None) -> None:
     p_health = sub.add_parser("health", help="TCP connection check")
     p_health.set_defaults(func=cmd_health)
 
-    p_upload = sub.add_parser("upload", help="Upload EDF/BDF/FIF/CDT via TCP")
+    p_upload = sub.add_parser(
+        "upload", help="Upload EDF/BDF/FIF/CDT/BrainVision/EEGLAB/XDF via TCP"
+    )
     p_upload.add_argument("file")
     p_upload.add_argument("--lab", default="")
     p_upload.add_argument("--paradigm", default="")
@@ -186,6 +239,23 @@ def main(argv: list[str] | None = None) -> None:
     p_import.add_argument("--batch-seconds", type=float, default=10.0)
     p_import.add_argument("--no-resume", action="store_true")
     p_import.set_defaults(func=cmd_import_dir)
+
+    p_bids = sub.add_parser("import-bids", help="Import a BIDS EEG dataset")
+    p_bids.add_argument("directory")
+    p_bids.add_argument("--lab", default="")
+    p_bids.add_argument("--device", default="")
+    p_bids.add_argument("--batch-seconds", type=float, default=10.0)
+    p_bids.add_argument("--no-resume", action="store_true")
+    p_bids.set_defaults(func=cmd_import_bids)
+
+    p_lsl = sub.add_parser("upload-lsl", help="Capture and upload a bounded LSL EEG stream")
+    p_lsl.add_argument("--duration", type=float, required=True, help="capture duration in seconds")
+    p_lsl.add_argument("--stream-name", default="")
+    p_lsl.add_argument("--stream-type", default="EEG")
+    p_lsl.add_argument("--resolve-timeout", type=float, default=5.0)
+    p_lsl.add_argument("--lab", default="")
+    p_lsl.add_argument("--paradigm", default="")
+    p_lsl.set_defaults(func=cmd_upload_lsl)
 
     p_list = sub.add_parser("list", help="List studies via TCP")
     p_list.set_defaults(func=cmd_list)

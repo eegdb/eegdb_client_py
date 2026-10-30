@@ -1,7 +1,7 @@
 # eegdb_client_py
 
 Python TCP client for [EEGDB](https://github.com/eegdb/eegdb): Fluent-design
-PyQt6 desktop GUI and CLI for EDF/BDF/FIF/CDT upload and download, plus
+PyQt6 desktop GUI and CLI for EDF/BDF/FIF/CDT/BrainVision/EEGLAB/XDF upload and download, plus
 notebook-friendly epoch analysis helpers.
 
 ## License
@@ -85,6 +85,8 @@ python -m eegdb_client health
 python -m eegdb_client --username uploader --password 'ACCOUNT_PASSWORD' upload recording.edf --lab mylab --paradigm resting
 python -m eegdb_client upload recording.cdt --lab mylab
 python -m eegdb_client import-dir ./bids-source --recursive --lab mylab
+python -m eegdb_client import-bids ./dataset --lab mylab
+python -m eegdb_client upload-lsl --duration 60 --stream-type EEG --lab mylab
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
 python -m eegdb_client export <study_id-1> <study_id-2> -o ./exports --format fif
@@ -110,8 +112,12 @@ python -m eegdb_client download <study_id> \
 `--codec` selects the server-side block codec used to re-encode each batch:
 `lz4`, `zstd`, `flac`, `wavpack`, `fast`, `balanced`, or `smallest`.
 
-Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt`, `.ceo`,
-`.dap`, `.rs3`, `.rs4`).
+Supported upload formats: `.edf`, `.bdf`, `.fif`, BrainVision (`.vhdr`),
+EEGLAB (`.set`), XDF (`.xdf`), and Curry (`.cdt`, `.ceo`, `.dap`, `.rs3`,
+`.rs4`). `import-bids` discovers BIDS EEG recordings, maps filename entities
+to Study attributes, and imports the matching `events.tsv` annotations.
+`upload-lsl` resolves an LSL stream by name or type, captures a bounded segment,
+and uploads it as a Study.
 
 Uploads read signal windows on demand. Downloads stage batches in temporary
 disk-backed arrays before writing the selected format, so transfer memory usage
