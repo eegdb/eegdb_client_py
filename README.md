@@ -238,7 +238,7 @@ tokens immediately.
 
 ## Build standalone app
 
-Linux / macOS:
+Linux:
 
 ```bash
 chmod +x scripts/build_linux.sh
@@ -247,6 +247,19 @@ chmod +x scripts/build_linux.sh
 # To build inside a virtual environment:
 PYTHON_BIN=.venv/bin/python ./scripts/build_linux.sh
 ```
+
+macOS:
+
+```bash
+chmod +x scripts/build_macos.sh
+./scripts/build_macos.sh
+# Output: dist/EEGDBClient.app and dist/EEGDBClient-macos-<arch>.zip
+```
+
+The macOS script applies an ad-hoc signature by default. Set
+`MACOS_SIGN_IDENTITY` to a Developer ID Application identity for release
+signing; Apple notarization is still required for a warning-free public
+download.
 
 Windows:
 

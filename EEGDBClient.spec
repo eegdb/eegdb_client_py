@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 from importlib.util import find_spec
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
@@ -95,3 +96,16 @@ coll = COLLECT(
     upx_exclude=[],
     name='EEGDBClient',
 )
+
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='EEGDBClient.app',
+        icon=None,
+        bundle_identifier='org.eegdb.client',
+        info_plist={
+            'CFBundleShortVersionString': '0.1.0',
+            'CFBundleVersion': '0.1.0',
+            'NSHighResolutionCapable': True,
+        },
+    )
