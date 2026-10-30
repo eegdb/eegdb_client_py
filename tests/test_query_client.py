@@ -46,6 +46,26 @@ def test_query_client_builds_get_request(monkeypatch):
     )
 
 
+def test_query_client_builds_multi_channel_request(monkeypatch):
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        return FakeResponse({"channels": []})
+
+    monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
+    client = EEGDBQueryClient("http://localhost:8080")
+
+    client.query_channels(
+        "s1", [0, 2], idx_start=10, idx_end=20, physical=True, references=[1]
+    )
+
+    assert calls[0].full_url == (
+        "http://localhost:8080/api/v1/databases/default/studies/s1/channels/data"
+        "?ids=0%2C2&idx_start=10&idx_end=20&physical=true&reference=1"
+    )
+
+
 def test_query_client_builds_post_json_request(monkeypatch):
     calls = []
 

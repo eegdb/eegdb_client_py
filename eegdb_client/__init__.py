@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-__all__ = ["EEGDBEpochs", "EEGDBQueryClient"]
+__all__ = ["EEGDBEpochs", "EEGDBQueryClient", "EEGDBTrials", "SignalChunk"]
 
 
 def __getattr__(name: str):
@@ -15,4 +15,8 @@ def __getattr__(name: str):
         from .query_client import EEGDBQueryClient
 
         return EEGDBQueryClient
+    if name in {"EEGDBTrials", "SignalChunk"}:
+        from .analysis import EEGDBTrials, SignalChunk
+
+        return {"EEGDBTrials": EEGDBTrials, "SignalChunk": SignalChunk}[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

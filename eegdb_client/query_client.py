@@ -70,6 +70,48 @@ class EEGDBQueryClient:
         }
         return self._request("GET", f"/api/v1/studies/{study_id}/channels/{channel_id}/data", params=params)
 
+    def query_channels(
+        self,
+        study_id: str,
+        channel_ids: Iterable[int],
+        *,
+        idx_start: Optional[int] = None,
+        idx_end: Optional[int] = None,
+        physical: bool = False,
+        references: Iterable[int] = (),
+    ) -> Dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/api/v1/studies/{study_id}/channels/data",
+            params={
+                "ids": list(channel_ids),
+                "idx_start": idx_start,
+                "idx_end": idx_end,
+                "physical": physical,
+                "reference": list(references),
+            },
+        )
+
+    def query_channel_arrow(
+        self,
+        study_id: str,
+        channel_id: int,
+        *,
+        idx_start: Optional[int] = None,
+        idx_end: Optional[int] = None,
+    ) -> bytes:
+        return self._request_bytes(
+            "GET",
+            f"/api/v1/studies/{study_id}/channels/{channel_id}/arrow",
+            params={"idx_start": idx_start, "idx_end": idx_end},
+            accept="application/vnd.apache.arrow.stream",
+        )
+
+    def iter_signal_chunks(self, study_id: str, channel_ids: Iterable[int], **kwargs: Any):
+        from .analysis.data import iter_signal_chunks
+
+        return iter_signal_chunks(self, study_id, list(channel_ids), **kwargs)
+
     def query_events(
         self,
         study_id: str,
@@ -211,6 +253,28 @@ class EEGDBQueryClient:
         if not payload:
             return {}
         return json.loads(payload.decode("utf-8"))
+
+    def _request_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[Mapping[str, Any]] = None,
+        accept: str = "application/octet-stream",
+    ) -> bytes:
+        query = encode_params(params or {})
+        if not path.startswith("/api/v1/"):
+            raise ValueError(f"unexpected API path: {path}")
+        url = f"{self.base_url}{self.api_base}{path.removeprefix('/api/v1')}"
+        if query:
+            url = f"{url}?{query}"
+        if not self.access_token and self.username and self.password:
+            self.login()
+        headers = {"Accept": accept}
+        if self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        with self._open(Request(url, headers=headers, method=method)) as resp:
+            return resp.read()
 
     def _ssl_context(self):
         context = ssl.create_default_context()

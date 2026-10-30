@@ -176,6 +176,24 @@ mne_epochs = epochs.to_mne()
 You can also use `EEGDBEpochs.from_server(client, ...)` with any client object
 that implements `query_epochs(...)`.
 
+For long recordings, iterate aligned multi-channel chunks and convert only the
+current chunk to Pandas or Arrow:
+
+```python
+from eegdb_client.analysis import EEGDBTrials
+
+for chunk in client.iter_signal_chunks(
+    "STUDY_ID", [0, 1], start=0, end=100_000, chunk_samples=4096
+):
+    frame = chunk.to_pandas()
+
+trials = EEGDBTrials.from_server(client, "STUDY_ID", condition="target")
+trial_frame = trials.to_pandas()
+```
+
+`eegdb_client.analysis.read_arrow_table(...)` reads the server's Arrow IPC
+channel export when the optional `pyarrow` package is installed.
+
 ## HTTP query helper
 
 Uploads and downloads use TCP. For analysis and admin reads, use
