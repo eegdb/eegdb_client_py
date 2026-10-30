@@ -47,7 +47,6 @@ def write_edf_from_study(
 
         headers = []
         for ch in channels:
-            ch_id = ch["channel_id"]
             if ch.get("data_type") in (DT_FLOAT32, DT_FLOAT64):
                 dig_min = -32768
                 dig_max = 32767

@@ -19,6 +19,15 @@ hiddenimports = [
     'eegdb_client.ui.pages.connect_page',
     'eegdb_client.ui.pages.upload_page',
     'eegdb_client.ui.pages.browse_page',
+    'eegdb_client.ui.pages.review_page',
+    'eegdb_client.analysis.data',
+    'eegdb_client.readers.bids',
+    'eegdb_client.readers.brainvision_reader',
+    'eegdb_client.readers.eeglab_reader',
+    'eegdb_client.readers.lsl_reader',
+    'eegdb_client.readers.xdf_reader',
+    'pyxdf',
+    'pylsl',
     'qfluentwidgets',
 ]
 tmp_ret = collect_all('mne')

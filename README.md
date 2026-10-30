@@ -45,6 +45,8 @@ eegdb_client_py/
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+# Contributor/test installation:
+pip install -e '.[dev]'
 ```
 
 ## Optional local decode

@@ -1,0 +1,52 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package and development tools
+        run: python -m pip install -e '.[dev]'
+      - name: Lint
+        run: python -m ruff check eegdb_client tests
+      - name: Tests
+        run: python -m pytest -q
+      - name: GUI import smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from PyQt6.QtWidgets import QApplication
+          from eegdb_client.ui.main_window import MainWindow
+          app = QApplication([])
+          window = MainWindow()
+          assert window.review_page.objectName() == "reviewPage"
+          window.close()
+          PY
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install build twine
+      - name: Build wheel and source archive
+        run: python -m build
+      - name: Validate package metadata
+        run: python -m twine check dist/*
