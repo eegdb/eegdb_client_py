@@ -1,7 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+from importlib.util import find_spec
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 PROJECT_ROOT = os.path.abspath(SPECPATH)
 
@@ -30,14 +31,27 @@ hiddenimports = [
     'pylsl',
     'qfluentwidgets',
 ]
-tmp_ret = collect_all('mne')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('PyQt6')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('pyedflib')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('qfluentwidgets')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# qfluentwidgets loads theme and icon resources dynamically. The other major
+# dependencies have PyInstaller hooks and are discovered through normal imports;
+# collecting all of MNE or PyQt6 would pull in unused CLI, 3D, QML, and SQL code.
+for package in ('qfluentwidgets',):
+    tmp_ret = collect_all(package)
+    datas += tmp_ret[0]
+    binaries += tmp_ret[1]
+    hiddenimports += tmp_ret[2]
+
+# MNE's lazy-loader reads package .pyi stubs at runtime. They are data rather
+# than importable modules, so dependency analysis alone does not include them.
+datas += collect_data_files('mne')
+hiddenimports += collect_submodules('mne')
+
+# Local compressed decoding is optional at runtime. Include the native codec
+# and its shared library when its separately-built wheel is installed.
+if find_spec('eegdb_codec') is not None:
+    tmp_ret = collect_all('eegdb_codec')
+    datas += tmp_ret[0]
+    binaries += tmp_ret[1]
+    hiddenimports += tmp_ret[2]
 
 
 a = Analysis(

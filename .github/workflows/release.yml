@@ -1,0 +1,50 @@
+name: Build release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  python-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-package
+          path: dist/*
+
+  standalone:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: EEGDBClient-linux-x86_64
+          - os: windows-latest
+            artifact: EEGDBClient-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build standalone app (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/build_linux.sh
+      - name: Build standalone app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/EEGDBClient/

@@ -39,21 +39,7 @@ if (-not (Test-PythonImport "eegdb_codec")) {
 }
 
 Write-Host "Running PyInstaller..."
-pyinstaller --noconfirm --clean --windowed `
-  --name EEGDBClient `
-  --add-data "$Root\LICENSE;." `
-  --add-data "$Root\THIRD_PARTY_LICENSES\WAVPACK-LICENSE;THIRD_PARTY_LICENSES" `
-  --paths $Root `
-  --hidden-import eegdb_client `
-  --hidden-import eegdb_codec `
-  --hidden-import eegdb_client.cli `
-  --hidden-import eegdb_client.ui.main_window `
-  --hidden-import eegdb_client.ui.attrs_form `
-  --collect-binaries eegdb_codec `
-  --collect-all mne `
-  --collect-all PyQt6 `
-  --collect-all pyedflib `
-  app.py
+python -m PyInstaller --noconfirm --clean EEGDBClient.spec
 
 $DistDir = Join-Path $Root "dist\EEGDBClient"
 if (-not (Test-Path (Join-Path $DistDir "EEGDBClient.exe"))) {

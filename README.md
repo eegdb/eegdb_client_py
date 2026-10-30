@@ -244,6 +244,8 @@ Linux / macOS:
 chmod +x scripts/build_linux.sh
 ./scripts/build_linux.sh
 # Output: dist/EEGDBClient/
+# To build inside a virtual environment:
+PYTHON_BIN=.venv/bin/python ./scripts/build_linux.sh
 ```
 
 Windows:
@@ -253,6 +255,9 @@ scripts/build_windows.ps1
 ```
 
 The Windows installer script is `scripts/eegdb_client.iss`.
+The standalone app includes the native local decoder when the optional
+`eegdb_codec` wheel is installed at build time; network download remains
+available without it.
 
 ## Related
 
