@@ -96,6 +96,9 @@ def download_study(
         if ext == "npz":
             write_npz_from_study(output_path, study, channel_data, events)
         elif ext == "fif":
+            if not output_path.endswith("_eeg.fif"):
+                root, _ = os.path.splitext(output_path)
+                output_path = root + "_eeg.fif"
             write_fif_from_study(output_path, study, channel_data, events)
         else:
             write_edf_from_study(output_path, study, channel_data, events, file_type=ext)

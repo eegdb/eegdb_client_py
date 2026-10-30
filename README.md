@@ -84,9 +84,18 @@ The client logs in over HTTPS, then uses the short-lived token on the TLS TCP co
 python -m eegdb_client health
 python -m eegdb_client --username uploader --password 'ACCOUNT_PASSWORD' upload recording.edf --lab mylab --paradigm resting
 python -m eegdb_client upload recording.cdt --lab mylab
+python -m eegdb_client import-dir ./bids-source --recursive --lab mylab
 python -m eegdb_client list
 python -m eegdb_client download <study_id> -o out.edf
+python -m eegdb_client export <study_id-1> <study_id-2> -o ./exports --format fif
 ```
+
+Uploads are resumable by default. The client records a local checkpoint after
+each complete time window and reuses the partial server Study when the same
+file and target are retried. Use `--no-resume` to start without recovery, or
+`--checkpoint PATH` to choose the single-file upload checkpoint location.
+`import-dir` continues after individual failures; rerunning the same command
+resumes incomplete files.
 
 Download with local `eegdb-codec` decode:
 

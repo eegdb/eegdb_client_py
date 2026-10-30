@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 from .download.fetcher import download_study
 from .logging_config import configure_logging, install_exception_hook
@@ -48,6 +49,8 @@ def cmd_upload(args: argparse.Namespace) -> None:
             attrs,
             batch_seconds=args.batch_seconds,
             on_progress=progress if args.verbose else None,
+            resume=not args.no_resume,
+            checkpoint_path=args.checkpoint,
         )
     print(study_id)
 
@@ -77,6 +80,65 @@ def cmd_download(args: argparse.Namespace) -> None:
             block_codec=args.codec,
         )
     print(path)
+
+
+def cmd_import_dir(args: argparse.Namespace) -> None:
+    root = Path(args.directory).expanduser()
+    if not root.is_dir():
+        raise SystemExit(f"directory not found: {root}")
+    allowed = {".edf", ".bdf", ".fif", ".cdt"}
+    iterator = root.rglob("*") if args.recursive else root.glob("*")
+    paths = sorted(path for path in iterator if path.is_file() and path.suffix.lower() in allowed)
+    if not paths:
+        raise SystemExit(f"no supported EEG files found in {root}")
+
+    attrs = StudyAttrs(lab=args.lab, paradigm=args.paradigm, device_type=args.device)
+    failures: list[tuple[Path, Exception]] = []
+    for index, path in enumerate(paths, 1):
+        print(f"[{index}/{len(paths)}] {path}")
+        try:
+            with _tcp_client(args) as client:
+                source = load_source_file(str(path))
+                study_id = upload_source_file(
+                    client,
+                    source,
+                    attrs,
+                    batch_seconds=args.batch_seconds,
+                    resume=not args.no_resume,
+                )
+            print(f"  uploaded {study_id}")
+        except Exception as exc:
+            logger.exception("batch import failed: %s", path)
+            failures.append((path, exc))
+            print(f"  failed: {exc}")
+    if failures:
+        raise SystemExit(f"{len(failures)} of {len(paths)} imports failed; rerun to resume")
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    output_dir = Path(args.output_dir).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    failures: list[tuple[str, Exception]] = []
+    for index, study_id in enumerate(args.study_ids, 1):
+        output = output_dir / f"{study_id}.{args.format}"
+        print(f"[{index}/{len(args.study_ids)}] {study_id}")
+        try:
+            with _tcp_client(args) as client:
+                saved = download_study(
+                    client,
+                    study_id,
+                    str(output),
+                    fmt=args.format,
+                    local_decode=args.local_decode,
+                    block_codec=args.codec,
+                )
+            print(f"  saved {saved}")
+        except Exception as exc:
+            logger.exception("batch export failed: %s", study_id)
+            failures.append((study_id, exc))
+            print(f"  failed: {exc}")
+    if failures:
+        raise SystemExit(f"{len(failures)} of {len(args.study_ids)} exports failed")
 
 
 def cmd_health(args: argparse.Namespace) -> None:
@@ -111,7 +173,19 @@ def main(argv: list[str] | None = None) -> None:
     p_upload.add_argument("--paradigm", default="")
     p_upload.add_argument("--device", default="")
     p_upload.add_argument("--batch-seconds", type=float, default=10.0)
+    p_upload.add_argument("--no-resume", action="store_true", help="disable upload checkpoint recovery")
+    p_upload.add_argument("--checkpoint", default=None, help="custom upload checkpoint path")
     p_upload.set_defaults(func=cmd_upload)
+
+    p_import = sub.add_parser("import-dir", help="Import all supported EEG files in a directory")
+    p_import.add_argument("directory")
+    p_import.add_argument("--recursive", action=argparse.BooleanOptionalAction, default=True)
+    p_import.add_argument("--lab", default="")
+    p_import.add_argument("--paradigm", default="")
+    p_import.add_argument("--device", default="")
+    p_import.add_argument("--batch-seconds", type=float, default=10.0)
+    p_import.add_argument("--no-resume", action="store_true")
+    p_import.set_defaults(func=cmd_import_dir)
 
     p_list = sub.add_parser("list", help="List studies via TCP")
     p_list.set_defaults(func=cmd_list)
@@ -138,6 +212,18 @@ def main(argv: list[str] | None = None) -> None:
         help="block codec for --local-decode (server re-encodes the batch; default: balanced)",
     )
     p_dl.set_defaults(func=cmd_download)
+
+    p_export = sub.add_parser("export", help="Export one or more studies")
+    p_export.add_argument("study_ids", nargs="+")
+    p_export.add_argument("-o", "--output-dir", required=True)
+    p_export.add_argument("-f", "--format", default="edf", choices=["edf", "bdf", "fif", "npz"])
+    p_export.add_argument("--local-decode", action="store_true")
+    p_export.add_argument(
+        "--codec",
+        default="balanced",
+        choices=["lz4", "zstd", "flac", "wavpack", "fast", "balanced", "smallest"],
+    )
+    p_export.set_defaults(func=cmd_export)
 
     args = parser.parse_args(argv)
     log_path = configure_logging(verbose=args.verbose, log_file=args.log_file)

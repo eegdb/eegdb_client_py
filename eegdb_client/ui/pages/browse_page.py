@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import Qt
@@ -80,7 +81,7 @@ class BrowsePage(QWidget):
         self.study_table.setBorderVisible(True)
         self.study_table.setBorderRadius(8)
         self.study_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.study_table.setSelectionMode(TableWidget.SelectionMode.SingleSelection)
+        self.study_table.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
         self.study_table.itemSelectionChanged.connect(self._on_selection_changed)
         left_layout.addWidget(self.study_table)
         splitter.addWidget(left)
@@ -152,18 +153,20 @@ class BrowsePage(QWidget):
         self.detail_view.clear()
 
     def _selected_study(self) -> dict[str, Any] | None:
-        rows = {idx.row() for idx in self.study_table.selectedIndexes()}
-        if len(rows) != 1:
+        studies = self._selected_studies()
+        if len(studies) != 1:
             return None
-        row = next(iter(rows))
-        if row < 0 or row >= len(self._studies):
-            return None
-        return self._studies[row]
+        return studies[0]
+
+    def _selected_studies(self) -> list[dict[str, Any]]:
+        rows = sorted({idx.row() for idx in self.study_table.selectedIndexes()})
+        return [self._studies[row] for row in rows if 0 <= row < len(self._studies)]
 
     def _on_selection_changed(self) -> None:
         study = self._selected_study()
         if study is None:
-            self.detail_view.clear()
+            count = len(self._selected_studies())
+            self.detail_view.setPlainText(f"{count} studies selected" if count else "")
             return
         lines = [
             f"Study ID: {study.get('study_id', '')}",
@@ -214,11 +217,11 @@ class BrowsePage(QWidget):
         self._run_list("Search", lambda client: client.search_studies(attrs))
 
     def _start_download(self) -> None:
-        study = self._selected_study()
-        if study is None:
+        studies = self._selected_studies()
+        if not studies:
             InfoBar.warning(
                 title="Download",
-                content="Select exactly one study.",
+                content="Select one or more studies.",
                 parent=self._window,
                 position=InfoBarPosition.TOP,
                 duration=3000,
@@ -228,11 +231,26 @@ class BrowsePage(QWidget):
         if client is None:
             return
 
-        study_id = study.get("study_id", "")
         fmt = self.fmt_combo.currentText()
-        path, _ = QFileDialog.getSaveFileName(self, "Save as", f"{study_id}.{fmt}", f"*.{fmt}")
-        if not path:
-            return
+        if len(studies) == 1:
+            study_id = studies[0].get("study_id", "")
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save as", f"{study_id}.{fmt}", f"*.{fmt}"
+            )
+            if not path:
+                return
+            targets = [(study_id, path)]
+        else:
+            directory = QFileDialog.getExistingDirectory(self, "Export selected studies")
+            if not directory:
+                return
+            targets = [
+                (
+                    study.get("study_id", ""),
+                    os.path.join(directory, f"{study.get('study_id', '')}.{fmt}"),
+                )
+                for study in studies
+            ]
 
         self.progress.setValue(0)
         self.status.setText("Starting…")
@@ -242,15 +260,27 @@ class BrowsePage(QWidget):
         block_codec = self.codec_combo.currentText()
 
         def job(on_progress):
-            return download_study(
-                client,
-                study_id,
-                path,
-                fmt=fmt,
-                on_progress=on_progress,
-                local_decode=local_decode,
-                block_codec=block_codec,
-            )
+            saved = []
+            for index, (study_id, path) in enumerate(targets):
+
+                def item_progress(message, fraction, index=index):
+                    on_progress(
+                        f"{study_id}: {message}",
+                        (index + fraction) / len(targets),
+                    )
+
+                saved.append(
+                    download_study(
+                        client,
+                        study_id,
+                        path,
+                        fmt=fmt,
+                        on_progress=item_progress,
+                        local_decode=local_decode,
+                        block_codec=block_codec,
+                    )
+                )
+            return saved[0] if len(saved) == 1 else f"{len(saved)} studies"
 
         worker = Worker(job)
         worker.progress.connect(self._on_progress)
