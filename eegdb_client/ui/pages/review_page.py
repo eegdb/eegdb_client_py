@@ -138,7 +138,9 @@ class ReviewPage(QWidget):
 
         annotation = QHBoxLayout()
         self.issue = ComboBox()
-        self.issue.addItems(["artifact", "flatline", "spike", "bad_channel"])
+        self.issue.addItems(
+            ["unknown_artifact", "flatline", "spike", "bad_channel"]
+        )
         self.severity = ComboBox()
         self.severity.addItems(["warning", "bad", "unusable", "info"])
         add_button = PushButton("Add manual annotation")

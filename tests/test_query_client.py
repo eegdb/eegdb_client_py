@@ -123,7 +123,7 @@ def test_query_client_posts_manual_quality_annotation(monkeypatch):
         "channel_id": 0,
         "start_index": 10,
         "end_index": 20,
-        "type": "artifact",
+        "type": "unknown_artifact",
         "severity": "bad",
     }
 

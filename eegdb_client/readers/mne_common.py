@@ -90,8 +90,10 @@ def _annotations_to_events(raw: mne.io.BaseRaw) -> List[Event]:
                 onset=int(onset * 1_000_000),
                 duration=int(duration * 1_000_000),
                 channel_id=0xFFFF,
+                type="marker",
                 code=str(desc),
                 description=str(desc),
+                source="mne",
             )
         )
     return events

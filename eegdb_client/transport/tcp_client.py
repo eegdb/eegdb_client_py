@@ -545,7 +545,6 @@ class EEGDBTCPClient:
         return protocol.SourceFileMetadata(
             original_name=str(value.get("original_name", "")),
             source_uri=str(value.get("source_uri", "")),
-            stored_path=str(value.get("stored_path", "")),
             format=str(value.get("format", "")),
             sha256=str(value.get("sha256", "")),
             size_bytes=int(value.get("size_bytes", 0)),

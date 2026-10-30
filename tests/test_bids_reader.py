@@ -8,6 +8,7 @@ from eegdb_client.readers.xdf_reader import (
     _select_eeg_stream,
 )
 from eegdb_client.readers.lsl_reader import record_lsl
+from eegdb_client.readers.mne_common import _annotations_to_events
 
 
 def test_bids_discovery_maps_filename_entities(tmp_path: Path):
@@ -117,3 +118,16 @@ def test_lsl_capture_builds_uploadable_source(monkeypatch):
     assert source.name == "demo-lsl"
     assert [channel.label for channel in source.channels] == ["C3", "C4"]
     assert source.channel_data[0].tolist() == [1.0, 3.0]
+
+
+def test_mne_annotations_use_valid_marker_event_type():
+    import mne
+
+    info = mne.create_info(["Cz"], 100, ch_types="eeg")
+    raw = mne.io.RawArray([[0.0] * 100], info, verbose=False)
+    raw.set_annotations(mne.Annotations([0.25], [0.1], ["stimulus-1"]))
+
+    events = _annotations_to_events(raw)
+
+    assert events[0].type == "marker"
+    assert events[0].source == "mne"

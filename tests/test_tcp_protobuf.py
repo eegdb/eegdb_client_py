@@ -33,6 +33,23 @@ class RecordingSocket:
 
 
 class ProtobufFrameTests(unittest.TestCase):
+    def test_source_metadata_uses_current_protocol_fields(self) -> None:
+        metadata = EEGDBTCPClient._source_to_proto(
+            {
+                "original_name": "recording.edf",
+                "source_uri": "file:///recording.edf",
+                "format": "edf",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "stored_path": "/server/private/path",
+            }
+        )
+
+        self.assertEqual(metadata.original_name, "recording.edf")
+        self.assertEqual(metadata.format, "edf")
+        self.assertEqual(metadata.size_bytes, 123)
+        self.assertNotIn("stored_path", metadata.DESCRIPTOR.fields_by_name)
+
     def test_global_account_login(self) -> None:
         client = EEGDBTCPClient(
             "localhost",
