@@ -12,6 +12,7 @@ logger = logging.getLogger(__package__)
 class Worker(QThread):
     progress = pyqtSignal(str, float)
     finished_ok = pyqtSignal(str)
+    finished_value = pyqtSignal(object)
     failed = pyqtSignal(str)
 
     def __init__(self, fn, *args, **kwargs):
@@ -25,6 +26,7 @@ class Worker(QThread):
         logger.info("background operation started: %s", operation)
         try:
             result = self._fn(*self._args, on_progress=self._emit, **self._kwargs)
+            self.finished_value.emit(result)
             self.finished_ok.emit(str(result))
             logger.info("background operation completed: %s", operation)
         except Exception as exc:

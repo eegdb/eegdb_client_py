@@ -18,7 +18,10 @@ from qfluentwidgets import (
 
 from ..transport.tcp_client import EEGDBTCPClient
 from ..logging_config import configure_logging, install_exception_hook
-from .pages import BrowsePage, ConnectPage, UploadPage
+from .pages.browse_page import BrowsePage
+from .pages.connect_page import ConnectPage
+from .pages.review_page import ReviewPage
+from .pages.upload_page import UploadPage
 from .workers import Worker
 
 logger = logging.getLogger(__package__)
@@ -37,10 +40,12 @@ class MainWindow(FluentWindow):
         self.connect_page = ConnectPage(self)
         self.upload_page = UploadPage(self)
         self.browse_page = BrowsePage(self)
+        self.review_page = ReviewPage(self)
 
         self.addSubInterface(self.connect_page, FIF.CONNECT, "Connect")
         self.addSubInterface(self.upload_page, FIF.UP, "Upload")
         self.addSubInterface(self.browse_page, FIF.SEARCH, "Browse")
+        self.addSubInterface(self.review_page, FIF.VIEW, "Review")
 
         self.navigationInterface.addItem(
             routeKey="theme",
@@ -122,6 +127,7 @@ class MainWindow(FluentWindow):
         self.connect_page.set_busy(busy)
         self.upload_page.set_connected(connected)
         self.browse_page.set_connected(connected)
+        self.review_page.set_connected(connected)
 
     def _toggle_theme(self) -> None:
         self._theme_dark = not self._theme_dark

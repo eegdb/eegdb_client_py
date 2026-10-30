@@ -93,6 +93,11 @@ class EEGDBQueryClient:
         }
         return self._request("GET", f"/api/v1/studies/{study_id}/events", params=params)
 
+    def query_trials(self, study_id: str, **filters: Any) -> Dict[str, Any]:
+        return self._request(
+            "GET", f"/api/v1/studies/{study_id}/trials", params=filters
+        )
+
     def query_quality(
         self,
         study_id: str,
@@ -139,6 +144,15 @@ class EEGDBQueryClient:
             body=dict(detector_options or {}),
         )
 
+    def add_quality_annotation(
+        self, study_id: str, annotation: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/studies/{study_id}/quality",
+            body=annotation,
+        )
+
     def query_epochs(self, study_id: str, **filters: Any) -> Dict[str, Any]:
         return self._request("GET", f"/api/v1/studies/{study_id}/epochs", params=filters)
 
@@ -164,6 +178,9 @@ class EEGDBQueryClient:
 
     def admin_check(self, *, quick: bool = False, async_job: bool = False) -> Dict[str, Any]:
         return self._request("GET", "/api/v1/admin/check", params={"quick": quick, "async": async_job})
+
+    def stats(self) -> Dict[str, Any]:
+        return self._request("GET", "/api/v1/stats")
 
     def _request(
         self,

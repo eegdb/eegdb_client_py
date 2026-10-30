@@ -90,6 +90,28 @@ def test_query_client_quality_scan_async_path(monkeypatch):
     assert json.loads(req.data.decode("utf-8")) == {"line_frequency": 60}
 
 
+def test_query_client_posts_manual_quality_annotation(monkeypatch):
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        return FakeResponse({"id": 7, "source": "manual"})
+
+    monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
+    client = EEGDBQueryClient("http://localhost:8080")
+    annotation = {
+        "channel_id": 0,
+        "start_index": 10,
+        "end_index": 20,
+        "type": "artifact",
+        "severity": "bad",
+    }
+
+    assert client.add_quality_annotation("s1", annotation)["id"] == 7
+    assert calls[0].get_method() == "POST"
+    assert json.loads(calls[0].data) == annotation
+
+
 def test_query_client_requires_database():
     try:
         EEGDBQueryClient(database=" ")

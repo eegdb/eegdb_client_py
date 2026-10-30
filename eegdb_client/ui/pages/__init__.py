@@ -5,3 +5,6 @@ from .connect_page import ConnectPage
 from .upload_page import UploadPage
 
 __all__ = ["BrowsePage", "ConnectPage", "UploadPage"]
+from .review_page import ReviewPage
+
+__all__ = ["ReviewPage"]

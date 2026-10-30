@@ -63,7 +63,9 @@ Alternatively, point `EEGDB_CODEC_LIB` at `libeegdbcodec.so`, `.dylib`, or
 
 ## Desktop GUI
 
-The GUI is a Fluent side-nav app with Connect, Upload, and Browse pages.
+The GUI is a Fluent side-nav app with Connect, Upload, Browse, and Review pages.
+Review plots a channel window with quality overlays, previews PSD and ERP
+results, runs the server quality scan, and records manual quality annotations.
 
 ```bash
 python app.py
