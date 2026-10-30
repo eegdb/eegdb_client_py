@@ -14,7 +14,7 @@ def read_cdt(path: str) -> SourceFile:
     Requires the ``curryreader`` package (MNE >= 1.11).
     """
     try:
-        raw = mne.io.read_raw_curry(path, preload=True, verbose=False)
+        raw = mne.io.read_raw_curry(path, preload=False, verbose=False)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Curry/CDT support requires the curryreader package. "

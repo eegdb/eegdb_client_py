@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pyedflib
 
-from ...models import DT_FLOAT32, DT_INT24, Event
+from ...models import DT_FLOAT32, DT_FLOAT64, DT_INT24, Event
 
 
 def write_edf_from_study(
@@ -46,12 +46,9 @@ def write_edf_from_study(
         )
 
         headers = []
-        buffers = []
         for ch in channels:
             ch_id = ch["channel_id"]
-            arr = channel_data[ch_id]
-            if ch.get("data_type") == DT_FLOAT32:
-                phys = arr.astype(np.float64)
+            if ch.get("data_type") in (DT_FLOAT32, DT_FLOAT64):
                 dig_min = -32768
                 dig_max = 32767
             else:
@@ -61,11 +58,10 @@ def write_edf_from_study(
                 else:
                     dig_min = int(ch.get("digital_min", -32768))
                     dig_max = int(ch.get("digital_max", 32767))
-                phys_min = float(ch.get("physical_min", dig_min))
-                phys_max = float(ch.get("physical_max", dig_max))
-                scale = (phys_max - phys_min) / (dig_max - dig_min) if dig_max != dig_min else 1.0
-                offset = phys_min - scale * dig_min
-                phys = arr.astype(np.float64) * scale + offset
+            phys_min = float(ch.get("physical_min", dig_min))
+            phys_max = float(ch.get("physical_max", dig_max))
+            if phys_max <= phys_min:
+                phys_min, phys_max = -1.0, 1.0
 
             sr = float(ch.get("sample_rate", 256.0))
             spr = int(ch.get("samples_per_record") or 0) or max(1, int(round(sr)))
@@ -74,18 +70,39 @@ def write_edf_from_study(
                     "label": str(ch.get("label", ""))[:16],
                     "dimension": str(ch.get("unit", "uV"))[:8],
                     "sample_frequency": spr,
-                    "physical_min": float(np.min(phys)),
-                    "physical_max": float(np.max(phys)),
+                    "physical_min": phys_min,
+                    "physical_max": phys_max,
                     "digital_min": dig_min,
                     "digital_max": dig_max,
                     "transducer": str(ch.get("transducer", ""))[:80],
                     "prefilter": str(ch.get("prefilter", ""))[:80],
                 }
             )
-            buffers.append(phys)
 
         writer.setSignalHeaders(headers)
-        writer.writeSamples(buffers)
+        record_count = max(
+            (len(channel_data[ch["channel_id"]]) + headers[i]["sample_frequency"] - 1)
+            // headers[i]["sample_frequency"]
+            for i, ch in enumerate(channels)
+        )
+        for record in range(record_count):
+            record_parts = []
+            for i, ch in enumerate(channels):
+                arr = channel_data[ch["channel_id"]]
+                spr = headers[i]["sample_frequency"]
+                start_idx, end_idx = record * spr, min((record + 1) * spr, len(arr))
+                raw = np.asarray(arr[start_idx:end_idx])
+                if ch.get("data_type") in (DT_FLOAT32, DT_FLOAT64):
+                    physical = raw.astype(np.float64)
+                else:
+                    dig_min, dig_max = headers[i]["digital_min"], headers[i]["digital_max"]
+                    phys_min, phys_max = headers[i]["physical_min"], headers[i]["physical_max"]
+                    scale = (phys_max - phys_min) / (dig_max - dig_min) if dig_max != dig_min else 1.0
+                    physical = raw.astype(np.float64) * scale + (phys_min - scale * dig_min)
+                if len(physical) < spr:
+                    physical = np.pad(physical, (0, spr - len(physical)))
+                record_parts.append(physical)
+            writer.blockWritePhysicalSamples(np.concatenate(record_parts))
 
         for e in events:
             writer.writeAnnotation(e.onset / 1_000_000.0, e.duration / 1_000_000.0, e.description or e.code)

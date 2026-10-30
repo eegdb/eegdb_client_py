@@ -17,7 +17,7 @@ def read_edf(path: str) -> SourceFile:
         data_type = DT_INT24 if is_bdf else DT_INT16
         n_signals = f.signals_in_file
         channels: list[ChannelDef] = []
-        channel_data: dict[int, np.ndarray] = {}
+        channel_lengths: dict[int, int] = {}
 
         for i in range(n_signals):
             dig_min = int(f.getDigitalMinimum(i))
@@ -48,7 +48,7 @@ def read_edf(path: str) -> SourceFile:
                 samples_per_record=spr,
             )
             channels.append(ch)
-            channel_data[i] = _read_digital(f, i, data_type)
+            channel_lengths[i] = int(f.getNSamples()[i])
 
         fmt = "bdf" if is_bdf else "edf"
         return SourceFile(
@@ -60,16 +60,28 @@ def read_edf(path: str) -> SourceFile:
             recording_id=f.getRecordingAdditional().strip(),
             start_time=f.getStartdatetime(),
             data_record_dur_sec=float(f.datarecord_duration),
-            channel_data=channel_data,
+            channel_lengths=channel_lengths,
+            channel_reader=lambda channel_id, start, stop: _read_digital_range(
+                path, channel_id, start, stop, data_type
+            ),
         )
     finally:
         f.close()
 
 
-def _read_digital(f: pyedflib.EdfReader, signal_idx: int, data_type: int) -> np.ndarray:
-    n = int(f.getNSamples()[signal_idx])
-    buf = np.zeros(n, dtype=np.int32)
-    f.read_digital_signal(signal_idx, 0, n, buf)
+def _read_digital_range(
+    path: str, signal_idx: int, start: int, stop: int, data_type: int
+) -> np.ndarray:
+    f = pyedflib.EdfReader(path)
+    try:
+        n = min(max(0, stop - start), max(0, int(f.getNSamples()[signal_idx]) - start))
+        if n == 0:
+            dtype = np.int16 if data_type == DT_INT16 else np.int32
+            return np.empty(0, dtype=dtype)
+        buf = np.zeros(n, dtype=np.int32)
+        f.read_digital_signal(signal_idx, start, n, buf)
+    finally:
+        f.close()
     if data_type == DT_INT16:
         return buf.astype(np.int16)
     return buf

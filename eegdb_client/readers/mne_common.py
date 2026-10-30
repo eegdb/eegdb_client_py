@@ -13,12 +13,12 @@ from ..models import DT_FLOAT32, ChannelDef, Event, SourceFile
 
 def raw_to_source_file(raw: mne.io.BaseRaw, path: str, fmt: str) -> SourceFile:
     channels: List[ChannelDef] = []
-    channel_data: dict[int, np.ndarray] = {}
+    channel_lengths: dict[int, int] = {}
 
     for i, name in enumerate(raw.ch_names):
         ch = raw.info["chs"][i]
         unit = _unit_name(ch.get("unit", mne.io.constants.FIFF.FIFF_UNIT_NONE))
-        data = raw.get_data(picks=[i])[0]
+        physical_min, physical_max = _channel_extrema(raw, i)
         channels.append(
             ChannelDef(
                 label=name,
@@ -27,11 +27,11 @@ def raw_to_source_file(raw: mne.io.BaseRaw, path: str, fmt: str) -> SourceFile:
                 data_type=DT_FLOAT32,
                 type=raw.get_channel_types()[i],
                 unit=unit,
-                physical_min=float(np.min(data)),
-                physical_max=float(np.max(data)),
+                physical_min=physical_min,
+                physical_max=physical_max,
             )
         )
-        channel_data[i] = data.astype(np.float32)
+        channel_lengths[i] = int(raw.n_times)
 
     return SourceFile(
         path=path,
@@ -43,8 +43,32 @@ def raw_to_source_file(raw: mne.io.BaseRaw, path: str, fmt: str) -> SourceFile:
         recording_id=raw.info.get("description") or "",
         start_time=raw.info.get("meas_date"),
         data_record_dur_sec=1.0,
-        channel_data=channel_data,
+        channel_lengths=channel_lengths,
+        channel_reader=lambda channel_id, start, stop: raw.get_data(
+            picks=[channel_id], start=start, stop=stop
+        )[0].astype(np.float32),
+        close_callback=raw.close,
     )
+
+
+def _channel_extrema(
+    raw: mne.io.BaseRaw, channel_id: int, chunk_samples: int = 1_000_000
+) -> tuple[float, float]:
+    minimum, maximum = float("inf"), float("-inf")
+    for start in range(0, int(raw.n_times), chunk_samples):
+        values = raw.get_data(
+            picks=[channel_id],
+            start=start,
+            stop=min(start + chunk_samples, raw.n_times),
+        )[0]
+        if values.size:
+            minimum = min(minimum, float(np.min(values)))
+            maximum = max(maximum, float(np.max(values)))
+    if not np.isfinite(minimum) or not np.isfinite(maximum):
+        return -1.0, 1.0
+    if minimum == maximum:
+        return minimum - 1.0, maximum + 1.0
+    return minimum, maximum
 
 
 def _unit_name(unit: int) -> str:

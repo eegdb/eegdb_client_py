@@ -299,8 +299,8 @@ class EEGDBTCPClient:
         block_codec: int,
     ) -> Tuple[int, int, int, bytes]:
         self._validate_read_count(sample_count)
-        if not 0 <= int(block_codec) <= 4:
-            raise ValueError(f"block_codec must be 0..4, got {block_codec}")
+        if not 0 <= int(block_codec) <= 6:
+            raise ValueError(f"block_codec must be 0..6, got {block_codec}")
         response = self._exchange(
             protocol.Envelope(
                 read_compressed_batch_request=protocol.ReadCompressedBatchRequest(

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+import numpy as np
 
 
 # Data types matching eegdb-codec pkg/wire (and EEGDB SSTable / TCP).
@@ -120,3 +122,23 @@ class SourceFile:
     start_time: Optional[datetime] = None
     data_record_dur_sec: float = 1.0
     channel_data: Dict[int, Any] = field(default_factory=dict)
+    channel_lengths: Dict[int, int] = field(default_factory=dict)
+    channel_reader: Optional[Callable[[int, int, int], np.ndarray]] = None
+    close_callback: Optional[Callable[[], None]] = None
+
+    def channel_length(self, channel_id: int) -> int:
+        if channel_id in self.channel_lengths:
+            return int(self.channel_lengths[channel_id])
+        return len(self.channel_data[channel_id])
+
+    def read_channel(self, channel_id: int, start: int, stop: int) -> np.ndarray:
+        if start < 0 or stop < start:
+            raise ValueError(f"invalid channel range [{start}, {stop})")
+        if self.channel_reader is not None:
+            return np.asarray(self.channel_reader(channel_id, start, stop))
+        return np.asarray(self.channel_data[channel_id][start:stop])
+
+    def close(self) -> None:
+        callback, self.close_callback = self.close_callback, None
+        if callback is not None:
+            callback()

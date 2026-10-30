@@ -9,5 +9,5 @@ from ..models import SourceFile
 
 
 def read_fif(path: str) -> SourceFile:
-    raw = mne.io.read_raw_fif(path, preload=True, verbose=False)
+    raw = mne.io.read_raw_fif(path, preload=False, verbose=False)
     return raw_to_source_file(raw, path, "fif")

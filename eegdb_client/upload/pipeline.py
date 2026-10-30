@@ -16,8 +16,6 @@ import logging
 import os
 from typing import Callable, Optional
 
-import numpy as np
-
 from ..models import SourceFile, StudyAttrs
 from ..transport.tcp_client import EEGDBTCPClient
 
@@ -32,6 +30,20 @@ def upload_source_file(
     batch_seconds: float = 10.0,
     on_progress: Optional[ProgressCallback] = None,
 ) -> str:
+    """Upload a source in bounded windows and release its backing reader."""
+    try:
+        return _upload_source_file(client, source, attrs, batch_seconds, on_progress)
+    finally:
+        source.close()
+
+
+def _upload_source_file(
+    client: EEGDBTCPClient,
+    source: SourceFile,
+    attrs: Optional[StudyAttrs],
+    batch_seconds: float,
+    on_progress: Optional[ProgressCallback],
+) -> str:
     logger.info(
         "upload started file=%s format=%s channels=%s",
         os.path.basename(source.path),
@@ -40,7 +52,6 @@ def upload_source_file(
     )
     attrs_dict = (attrs or StudyAttrs()).to_dict()
     channels = [ch.to_dict() for ch in source.channels]
-    channel_data = {int(ch.channel_id): np.asarray(source.channel_data[int(ch.channel_id)]) for ch in source.channels}
     source_meta = {
         "original_name": os.path.basename(source.path),
         "format": source.format,
@@ -58,17 +69,20 @@ def upload_source_file(
     # Use the first channel's rate for the shared time window (import-style).
     ref_rate = float(channels[0].get("sample_rate") or 1.0)
     batch_samples = max(1, int(round(ref_rate * batch_seconds)))
-    totals = {int(ch["channel_id"]): len(channel_data[int(ch["channel_id"])]) for ch in channels}
-    max_total = max(totals.values()) if totals else 0
+    totals = {int(ch["channel_id"]): source.channel_length(int(ch["channel_id"])) for ch in channels}
+    max_total = max(
+        (
+            int(round(totals[int(ch["channel_id"])] * ref_rate / float(ch.get("sample_rate") or ref_rate)))
+            for ch in channels
+        ),
+        default=0,
+    )
     n_windows = (max_total + batch_samples - 1) // batch_samples if max_total else 0
 
     for w, start in enumerate(range(0, max_total, batch_samples)):
         for ch in channels:
             ch_id = int(ch["channel_id"])
-            data = channel_data[ch_id]
             total = totals[ch_id]
-            if start >= total:
-                continue
             # Scale window by channel rate vs reference so mixed-rate files stay aligned in time.
             sample_rate = float(ch.get("sample_rate") or ref_rate)
             ch_batch = max(1, int(round(sample_rate / ref_rate * batch_samples)))
@@ -76,7 +90,8 @@ def upload_source_file(
             if ch_start >= total:
                 continue
             end = min(ch_start + ch_batch, total)
-            client.write_batch(study_id, ch_id, int(ch["data_type"]), ch_start, data[ch_start:end])
+            values = source.read_channel(ch_id, ch_start, end)
+            client.write_batch(study_id, ch_id, int(ch["data_type"]), ch_start, values)
         if on_progress and n_windows:
             on_progress(f"Window {w + 1}/{n_windows}", 0.05 + 0.85 * (w + 1) / n_windows)
 

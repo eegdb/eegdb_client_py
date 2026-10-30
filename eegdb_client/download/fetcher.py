@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from typing import Callable, Optional
 
 import numpy as np
@@ -50,52 +51,54 @@ def download_study(
     if local_decode:
         codec = LocalCodec()
 
-    channel_data: dict[int, np.ndarray] = {}
-    n = len(channels)
-
     total = int(study.get("num_samples") or 0)
     if total <= 0:
         start_idx = int(study.get("start_index") or 0)
         end_idx = int(study.get("end_index") or 0)
         total = max(0, end_idx - start_idx)
 
-    for i, ch in enumerate(channels):
-        ch_id = ch["channel_id"]
-        data_type = ch.get("data_type", 0x01)
-        ch_total = total
-        if ch_total <= 0 and i == 0:
-            ch_total = _probe_channel_length(client, study_id, ch_id, data_type)
-        if ch_total <= 0:
-            raise ValueError("cannot determine sample count for study")
-        arr = client.read_channel_all(
-            study_id,
-            ch_id,
-            data_type,
-            ch_total,
-            batch_size,
-            local_decode=local_decode,
-            block_codec=codec_id,
-            codec=codec,
-        )
-        channel_data[ch_id] = arr
-        if total <= 0 and i == 0:
-            total = len(arr)
-        if on_progress:
-            on_progress(f"Downloaded {ch.get('label', ch_id)}", (i + 1) / n)
+    with tempfile.TemporaryDirectory(prefix="eegdb-download-") as temp_dir:
+        channel_data: dict[int, np.ndarray] = {}
+        n = len(channels)
+        for i, ch in enumerate(channels):
+            ch_id = int(ch["channel_id"])
+            data_type = int(ch.get("data_type", 0x01))
+            ch_total = total
+            if ch_total <= 0 and i == 0:
+                ch_total = _probe_channel_length(client, study_id, ch_id, data_type)
+            if ch_total <= 0:
+                raise ValueError("cannot determine sample count for study")
+            arr = _download_channel_to_disk(
+                client,
+                study_id,
+                ch_id,
+                data_type,
+                ch_total,
+                batch_size,
+                os.path.join(temp_dir, f"channel-{ch_id}.bin"),
+                local_decode=local_decode,
+                block_codec=codec_id,
+                codec=codec,
+            )
+            channel_data[ch_id] = arr
+            if total <= 0 and i == 0:
+                total = len(arr)
+            if on_progress:
+                on_progress(f"Downloaded {ch.get('label', ch_id)}", 0.9 * (i + 1) / n)
 
-    events = client.read_events(study_id)
-    ext = fmt.lower()
-    if ext == "edf" and any(int(ch.get("data_type", 0)) == 0x02 for ch in channels):
-        # EDF is 16-bit; INT24 studies must be written as BDF.
-        ext = "bdf"
-        root, _ = os.path.splitext(output_path)
-        output_path = root + ".bdf"
-    if ext == "npz":
-        write_npz_from_study(output_path, study, channel_data, events)
-    elif ext == "fif":
-        write_fif_from_study(output_path, study, channel_data, events)
-    else:
-        write_edf_from_study(output_path, study, channel_data, events, file_type=ext)
+        events = client.read_events(study_id)
+        ext = fmt.lower()
+        if ext == "edf" and any(int(ch.get("data_type", 0)) == 0x02 for ch in channels):
+            # EDF is 16-bit; INT24 studies must be written as BDF.
+            ext = "bdf"
+            root, _ = os.path.splitext(output_path)
+            output_path = root + ".bdf"
+        if ext == "npz":
+            write_npz_from_study(output_path, study, channel_data, events)
+        elif ext == "fif":
+            write_fif_from_study(output_path, study, channel_data, events)
+        else:
+            write_edf_from_study(output_path, study, channel_data, events, file_type=ext)
 
     if on_progress:
         on_progress("Saved " + os.path.basename(output_path), 1.0)
@@ -103,7 +106,53 @@ def download_study(
     return output_path
 
 
-def _probe_channel_length(client: EEGDBTCPClient, study_id: str, channel_id: int, data_type: int) -> int:
+def _download_channel_to_disk(
+    client: EEGDBTCPClient,
+    study_id: str,
+    channel_id: int,
+    data_type: int,
+    total_samples: int,
+    batch_size: int,
+    temp_path: str,
+    *,
+    local_decode: bool,
+    block_codec: int,
+    codec: Optional[LocalCodec],
+) -> np.ndarray:
+    values = np.memmap(
+        temp_path,
+        dtype=client._numpy_dtype(data_type),
+        mode="w+",
+        shape=(total_samples,),
+    )
+    start = 0
+    while start < total_samples:
+        count = min(batch_size, total_samples - start)
+        if local_decode:
+            if codec is None:
+                raise ValueError("local_decode requires a LocalCodec instance")
+            _, got, algorithm, compressed = client.read_compressed_batch(
+                study_id, channel_id, data_type, start, count, block_codec
+            )
+            batch = (
+                codec.decode(data_type, algorithm, got, compressed)
+                if got
+                else np.empty(0)
+            )
+        else:
+            _, batch = client.read_batch(study_id, channel_id, data_type, start, count)
+            got = len(batch)
+        if got == 0:
+            break
+        values[start : start + got] = batch
+        start += got
+    values.flush()
+    return values[:start]
+
+
+def _probe_channel_length(
+    client: EEGDBTCPClient, study_id: str, channel_id: int, data_type: int
+) -> int:
     """Binary search upper bound when study metadata lacks sample count."""
     lo, hi = 0, 1
     while True:

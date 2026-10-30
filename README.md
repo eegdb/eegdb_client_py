@@ -104,6 +104,11 @@ python -m eegdb_client download <study_id> \
 Supported upload formats: `.edf`, `.bdf`, `.fif`, Curry (`.cdt`, `.ceo`,
 `.dap`, `.rs3`, `.rs4`).
 
+Uploads read signal windows on demand. Downloads stage batches in temporary
+disk-backed arrays before writing the selected format, so transfer memory usage
+does not grow with the full recording size. Downloads therefore need temporary
+disk space roughly equal to the uncompressed signal data.
+
 FLOAT channels are uploaded as-is over TCP. Compression, including `uv0.1`
 lossy FLOAT compression, is configured on the EEGDB server.
 
