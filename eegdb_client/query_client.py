@@ -229,6 +229,20 @@ class EEGDBQueryClient:
             body=annotation,
         )
 
+    def update_quality_annotation(
+        self, study_id: str, annotation_id: int, annotation: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        return self._request(
+            "PATCH",
+            f"/api/v1/studies/{study_id}/quality/{annotation_id}",
+            body=annotation,
+        )
+
+    def delete_quality_annotation(self, study_id: str, annotation_id: int) -> Dict[str, Any]:
+        return self._request(
+            "DELETE", f"/api/v1/studies/{study_id}/quality/{annotation_id}"
+        )
+
     def query_epochs(self, study_id: str, **filters: Any) -> Dict[str, Any]:
         return self._request("GET", f"/api/v1/studies/{study_id}/epochs", params=filters)
 

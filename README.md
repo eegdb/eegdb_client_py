@@ -68,8 +68,8 @@ Alternatively, point `EEGDB_CODEC_LIB` at `libeegdbcodec.so`, `.dylib`, or
 The GUI is a Fluent side-nav app with Connect, Upload, Browse, and Review pages.
 Review plots a channel window with quality overlays, previews PSD and ERP
 results, edits the complete event table, runs the server quality scan, and
-records manual quality annotations. Browse can edit Study metadata or delete a
-Study after confirmation.
+records, reviews, corrects, or deletes quality annotations. Browse can edit
+Study metadata or delete a Study after confirmation.
 
 ```bash
 python app.py

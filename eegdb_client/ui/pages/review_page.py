@@ -23,6 +23,7 @@ from qfluentwidgets import (
 
 from ...query_client import EEGDBQueryClient
 from ..event_dialog import EventEditDialog
+from ..quality_dialog import QualityReviewDialog
 from ..workers import Worker
 
 if TYPE_CHECKING:
@@ -126,6 +127,7 @@ class ReviewPage(QWidget):
             ("PSD", self._load_psd),
             ("ERP", self._load_erp),
             ("Run quality scan", self._scan_quality),
+            ("Review quality", self._review_quality),
         ):
             button = PrimaryPushButton(text) if text == "Load review" else PushButton(text)
             button.clicked.connect(callback)
@@ -269,6 +271,22 @@ class ReviewPage(QWidget):
 
     def _scan_quality(self) -> None:
         self._run("quality", lambda client, study_id: client.scan_quality(study_id))
+
+    def _review_quality(self) -> None:
+        try:
+            client, study_id = self._client(), self._study_id()
+            response = client.query_quality(study_id)
+            dialog = QualityReviewDialog(response.get("annotations") or [], self)
+            if not dialog.exec():
+                return
+            for annotation in dialog.annotations():
+                client.update_quality_annotation(study_id, int(annotation["id"]), annotation)
+            for annotation_id in dialog.deleted_ids():
+                client.delete_quality_annotation(study_id, annotation_id)
+        except Exception as exc:
+            InfoBar.error(title="Quality review failed", content=str(exc), parent=self._window, position=InfoBarPosition.TOP, duration=5000)
+            return
+        InfoBar.success(title="Quality review saved", content="Annotations and summaries updated", parent=self._window, position=InfoBarPosition.TOP, duration=3000)
 
     def _add_annotation(self) -> None:
         annotation = {

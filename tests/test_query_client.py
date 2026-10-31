@@ -196,6 +196,20 @@ def test_query_client_replaces_events_including_empty_list(monkeypatch):
     assert json.loads(calls[1].data) == {"events": []}
 
 
+def test_query_client_updates_and_deletes_quality_annotation(monkeypatch):
+    calls = []
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        return FakeResponse({"status": "ok"})
+    monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
+    client = EEGDBQueryClient("http://localhost:8080")
+    client.update_quality_annotation("s1", 7, {"severity": "warning"})
+    client.delete_quality_annotation("s1", 7)
+    assert calls[0].get_method() == "PATCH"
+    assert calls[0].full_url.endswith("/studies/s1/quality/7")
+    assert calls[1].get_method() == "DELETE"
+
+
 def test_query_client_requires_database():
     try:
         EEGDBQueryClient(database=" ")
