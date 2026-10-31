@@ -33,6 +33,37 @@ class RecordingSocket:
 
 
 class ProtobufFrameTests(unittest.TestCase):
+    def test_update_and_delete_study_messages(self) -> None:
+        client = EEGDBTCPClient("localhost", 9000)
+        updated = protocol.Study(
+            study_id="study-1",
+            name="Updated",
+            attributes=protocol.StudyAttributes(lab="lab-a"),
+        )
+        client._exchange = MagicMock(  # type: ignore[method-assign]
+            side_effect=[
+                protocol.Envelope(
+                    update_study_response=protocol.UpdateStudyResponse(study=updated)
+                ),
+                protocol.Envelope(
+                    delete_study_response=protocol.DeleteStudyResponse(study_id="study-1")
+                ),
+            ]
+        )
+
+        result = client.update_study(
+            "study-1", name="Updated", attrs={"lab": "lab-a"}
+        )
+        deleted = client.delete_study("study-1")
+
+        self.assertEqual(result["name"], "Updated")
+        self.assertEqual(result["attributes"]["lab"], "lab-a")
+        self.assertEqual(deleted, "study-1")
+        update_envelope = client._exchange.call_args_list[0].args[0]
+        self.assertTrue(update_envelope.update_study_request.HasField("name"))
+        self.assertEqual(update_envelope.update_study_request.name, "Updated")
+        self.assertEqual(update_envelope.update_study_request.attributes.lab, "lab-a")
+
     def test_source_metadata_uses_current_protocol_fields(self) -> None:
         metadata = EEGDBTCPClient._source_to_proto(
             {

@@ -46,6 +46,31 @@ class EEGDBQueryClient:
     def get_study(self, study_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/api/v1/studies/{study_id}")
 
+    def search_studies(self, attributes: Mapping[str, Any]) -> Dict[str, Any]:
+        filters = {str(key): value for key, value in attributes.items() if value not in (None, "")}
+        if not filters:
+            raise ValueError("at least one search attribute is required")
+        return self._request("GET", "/api/v1/studies/search", params=filters)
+
+    def update_study(
+        self,
+        study_id: str,
+        *,
+        name: Optional[str] = None,
+        attributes: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if name is None and attributes is None:
+            raise ValueError("name or attributes is required")
+        body: Dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if attributes is not None:
+            body["attributes"] = dict(attributes)
+        return self._request("PATCH", f"/api/v1/studies/{study_id}", body=body)
+
+    def delete_study(self, study_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/api/v1/studies/{study_id}")
+
     def query_channel(
         self,
         study_id: str,

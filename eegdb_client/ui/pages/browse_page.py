@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QSplitter,
+    QMessageBox,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -32,6 +34,7 @@ from qfluentwidgets import (
 )
 
 from ...download.fetcher import download_study
+from ..study_dialog import StudyEditDialog
 from ..workers import Worker
 
 if TYPE_CHECKING:
@@ -116,6 +119,12 @@ class BrowsePage(QWidget):
 
         self.download_btn = PrimaryPushButton("Download selected")
         self.download_btn.clicked.connect(self._start_download)
+        self.edit_btn = PushButton("Edit metadata")
+        self.edit_btn.clicked.connect(self._edit_study)
+        self.delete_btn = PushButton("Delete study")
+        self.delete_btn.clicked.connect(self._delete_study)
+        dl_row.addWidget(self.edit_btn)
+        dl_row.addWidget(self.delete_btn)
         dl_row.addWidget(self.download_btn)
         dl_row.addStretch()
         root.addLayout(dl_row)
@@ -133,6 +142,9 @@ class BrowsePage(QWidget):
         enabled = connected and not busy
         self.study_table.setEnabled(enabled)
         self.download_btn.setEnabled(enabled)
+        single_selected = len(self._selected_studies()) == 1
+        self.edit_btn.setEnabled(enabled and single_selected)
+        self.delete_btn.setEnabled(enabled and single_selected)
         self.search_lab_edit.setEnabled(not busy)
         self.search_paradigm_edit.setEnabled(not busy)
 
@@ -164,6 +176,7 @@ class BrowsePage(QWidget):
 
     def _on_selection_changed(self) -> None:
         study = self._selected_study()
+        self.set_connected(self._window.is_connected())
         if study is None:
             count = len(self._selected_studies())
             self.detail_view.setPlainText(f"{count} studies selected" if count else "")
@@ -183,6 +196,58 @@ class BrowsePage(QWidget):
         else:
             lines.append("  (none)")
         self.detail_view.setPlainText("\n".join(lines))
+
+    def _edit_study(self) -> None:
+        study = self._selected_study()
+        client = self._window.require_client()
+        if study is None or client is None:
+            return
+        dialog = StudyEditDialog(study, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, attrs = dialog.values()
+        try:
+            client.update_study(study["study_id"], name=name, attrs=attrs)
+        except Exception as exc:
+            self._window.handle_tcp_failure("Update failed", str(exc))
+            return
+        self._refresh_studies()
+        InfoBar.success(
+            title="Study updated",
+            content=study["study_id"],
+            parent=self._window,
+            position=InfoBarPosition.TOP,
+            duration=3000,
+        )
+
+    def _delete_study(self) -> None:
+        study = self._selected_study()
+        client = self._window.require_client()
+        if study is None or client is None:
+            return
+        study_id = study.get("study_id", "")
+        answer = QMessageBox.question(
+            self,
+            "Delete study",
+            f"Permanently delete {study_id} and all of its signal data?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            client.delete_study(study_id)
+        except Exception as exc:
+            self._window.handle_tcp_failure("Delete failed", str(exc))
+            return
+        self._refresh_studies()
+        InfoBar.success(
+            title="Study deleted",
+            content=study_id,
+            parent=self._window,
+            position=InfoBarPosition.TOP,
+            duration=3000,
+        )
 
     def _run_list(self, title: str, fn) -> None:
         client = self._window.require_client()

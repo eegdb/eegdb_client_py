@@ -90,6 +90,50 @@ def test_query_client_builds_post_json_request(monkeypatch):
     }
 
 
+def test_query_client_searches_updates_and_deletes_studies(monkeypatch):
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        return FakeResponse({"ok": True})
+
+    monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
+    client = EEGDBQueryClient("http://localhost:8080", database="lab")
+
+    client.search_studies({"lab": "sleep lab", "empty": ""})
+    client.update_study("s/1", name="Night 1", attributes={"condition": "control"})
+    client.delete_study("s/1")
+
+    assert calls[0].get_method() == "GET"
+    assert calls[0].full_url == (
+        "http://localhost:8080/api/v1/databases/lab/studies/search?lab=sleep+lab"
+    )
+    assert calls[1].get_method() == "PATCH"
+    assert calls[1].full_url == "http://localhost:8080/api/v1/databases/lab/studies/s/1"
+    assert json.loads(calls[1].data) == {
+        "name": "Night 1",
+        "attributes": {"condition": "control"},
+    }
+    assert calls[2].get_method() == "DELETE"
+
+
+def test_query_client_requires_study_search_or_update_fields():
+    client = EEGDBQueryClient("http://localhost:8080")
+    try:
+        client.search_studies({"lab": ""})
+    except ValueError as exc:
+        assert "search attribute" in str(exc)
+    else:
+        raise AssertionError("expected empty search to fail")
+
+    try:
+        client.update_study("s1")
+    except ValueError as exc:
+        assert "name or attributes" in str(exc)
+    else:
+        raise AssertionError("expected empty update to fail")
+
+
 def test_query_client_quality_scan_async_path(monkeypatch):
     calls = []
 

@@ -262,6 +262,37 @@ class EEGDBTCPClient:
             raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
         return [self._study_to_dict(study) for study in response.search_studies_response.studies]
 
+    def update_study(
+        self,
+        study_id: str,
+        *,
+        name: Optional[str] = None,
+        attrs: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if name is None and attrs is None:
+            raise ValueError("name or attrs is required")
+        request = protocol.UpdateStudyRequest(study_id=study_id)
+        if name is not None:
+            request.name = name
+        if attrs is not None:
+            request.attributes.CopyFrom(self._attrs_to_proto(attrs))
+        response = self._exchange(
+            protocol.Envelope(update_study_request=request)
+        )
+        if not response.HasField("update_study_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return self._study_to_dict(response.update_study_response.study)
+
+    def delete_study(self, study_id: str) -> str:
+        response = self._exchange(
+            protocol.Envelope(
+                delete_study_request=protocol.DeleteStudyRequest(study_id=study_id)
+            )
+        )
+        if not response.HasField("delete_study_response"):
+            raise TCPError(0, f"unexpected response {response.WhichOneof('body')}")
+        return response.delete_study_response.study_id
+
     def read_batch(
         self,
         study_id: str,
