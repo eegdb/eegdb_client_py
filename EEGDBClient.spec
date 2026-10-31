@@ -17,6 +17,7 @@ hiddenimports = [
     'eegdb_client.ui.main_window',
     'eegdb_client.ui.attrs_form',
     'eegdb_client.ui.study_dialog',
+    'eegdb_client.ui.event_dialog',
     'eegdb_client.ui.workers',
     'eegdb_client.ui.pages',
     'eegdb_client.ui.pages.connect_page',

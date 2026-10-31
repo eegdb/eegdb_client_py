@@ -67,7 +67,9 @@ Alternatively, point `EEGDB_CODEC_LIB` at `libeegdbcodec.so`, `.dylib`, or
 
 The GUI is a Fluent side-nav app with Connect, Upload, Browse, and Review pages.
 Review plots a channel window with quality overlays, previews PSD and ERP
-results, runs the server quality scan, and records manual quality annotations.
+results, edits the complete event table, runs the server quality scan, and
+records manual quality annotations. Browse can edit Study metadata or delete a
+Study after confirmation.
 
 ```bash
 python app.py
@@ -214,6 +216,7 @@ client = EEGDBQueryClient(
 studies = client.list_studies()
 study = client.get_study("STUDY_ID")
 events = client.query_events("STUDY_ID", event_type="stimulus", code="target")
+client.replace_events("STUDY_ID", events["events"])
 quality = client.quality_scores("STUDY_ID", channels=[0, 1], range_samples=1024)
 psd = client.query_psd("STUDY_ID", channels=[0, 1], idx_start=0, idx_end=4096)
 

@@ -160,6 +160,15 @@ class EEGDBQueryClient:
         }
         return self._request("GET", f"/api/v1/studies/{study_id}/events", params=params)
 
+    def replace_events(
+        self, study_id: str, events: Iterable[Mapping[str, Any]]
+    ) -> Dict[str, Any]:
+        return self._request(
+            "PUT",
+            f"/api/v1/studies/{study_id}/events",
+            body={"events": [dict(event) for event in events]},
+        )
+
     def query_trials(self, study_id: str, **filters: Any) -> Dict[str, Any]:
         return self._request(
             "GET", f"/api/v1/studies/{study_id}/trials", params=filters

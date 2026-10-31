@@ -176,6 +176,26 @@ def test_query_client_posts_manual_quality_annotation(monkeypatch):
     assert json.loads(calls[0].data) == annotation
 
 
+def test_query_client_replaces_events_including_empty_list(monkeypatch):
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        return FakeResponse({"status": "ok"})
+
+    monkeypatch.setattr("eegdb_client.query_client.urlopen", fake_urlopen)
+    client = EEGDBQueryClient("http://localhost:8080")
+
+    client.replace_events("s1", [{"type": "marker", "code": "edited"}])
+    client.replace_events("s1", [])
+
+    assert calls[0].get_method() == "PUT"
+    assert json.loads(calls[0].data) == {
+        "events": [{"type": "marker", "code": "edited"}]
+    }
+    assert json.loads(calls[1].data) == {"events": []}
+
+
 def test_query_client_requires_database():
     try:
         EEGDBQueryClient(database=" ")

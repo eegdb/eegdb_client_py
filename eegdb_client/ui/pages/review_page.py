@@ -17,9 +17,12 @@ from qfluentwidgets import (
     SpinBox,
     SubtitleLabel,
     TextEdit,
+    InfoBar,
+    InfoBarPosition,
 )
 
 from ...query_client import EEGDBQueryClient
+from ..event_dialog import EventEditDialog
 from ..workers import Worker
 
 if TYPE_CHECKING:
@@ -119,6 +122,7 @@ class ReviewPage(QWidget):
         actions = QHBoxLayout()
         for text, callback in (
             ("Load review", self._load_review),
+            ("Edit events", self._edit_events),
             ("PSD", self._load_psd),
             ("ERP", self._load_erp),
             ("Run quality scan", self._scan_quality),
@@ -220,6 +224,33 @@ class ReviewPage(QWidget):
                 idx_end=self.end.value(),
                 physical=True,
             ),
+        )
+
+    def _edit_events(self) -> None:
+        try:
+            client = self._client()
+            study_id = self._study_id()
+            response = client.query_events(study_id)
+            dialog = EventEditDialog(response.get("events") or [], self)
+            if not dialog.exec():
+                return
+            events = dialog.events()
+            client.replace_events(study_id, events)
+        except Exception as exc:
+            InfoBar.error(
+                title="Event update failed",
+                content=str(exc),
+                parent=self._window,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+            )
+            return
+        InfoBar.success(
+            title="Events updated",
+            content=f"{len(events)} event(s) saved",
+            parent=self._window,
+            position=InfoBarPosition.TOP,
+            duration=3000,
         )
 
     def _load_erp(self) -> None:
