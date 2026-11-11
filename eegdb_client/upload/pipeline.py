@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ..models import SourceFile, StudyAttrs
-from ..transport.tcp_client import EEGDBTCPClient
+from ..transport.base import TransferClient
 from .checkpoint import (
     UploadCheckpoint,
     default_checkpoint_path,
@@ -31,7 +31,7 @@ logger = logging.getLogger(__package__)
 
 
 def upload_source_file(
-    client: EEGDBTCPClient,
+    client: TransferClient,
     source: SourceFile,
     attrs: Optional[StudyAttrs] = None,
     batch_seconds: float = 10.0,
@@ -56,7 +56,7 @@ def upload_source_file(
 
 
 def _upload_source_file(
-    client: EEGDBTCPClient,
+    client: TransferClient,
     source: SourceFile,
     attrs: Optional[StudyAttrs],
     batch_seconds: float,

@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 arrow = ["pyarrow>=16"]
+embedded = ["eegdb-storage"]
 dev = [
   "build>=1.2",
   "pytest>=8",

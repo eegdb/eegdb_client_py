@@ -137,6 +137,23 @@ Common options: `--host`, `--port`, `--database`, `--http-url`, `--username`,
 `--password`, and `-v`. Use `--insecure-skip-tls-verify` only with a local
 self-signed development certificate.
 
+### Embedded local storage
+
+Install the optional `eegdb-storage` wheel to work with a local database
+directory without running an EEGDB server:
+
+```bash
+pip install 'eegdb-client[embedded]'
+eegdb-client --backend local --storage-path ./recording-db list
+eegdb-client --backend local --storage-path ./recording-db upload recording.fif
+eegdb-client --backend local --storage-path ./recording-db download STUDY_ID -o out.npz -f npz
+```
+
+A local storage directory is process-exclusive. Do not open a directory that
+is currently in use by an EEGDB server or another client process. Embedded mode
+does not use server authentication. `--local-decode` is TCP-only because local
+reads are already decoded by the storage library.
+
 ## Logs
 
 Both the GUI and CLI write rotating logs to the platform user log directory.

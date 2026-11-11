@@ -14,6 +14,7 @@ import numpy as np
 
 from ..models import DT_FLOAT32, DT_FLOAT64, DT_INT16, DT_INT24, DT_INT64, Event
 from ..protocol.v1 import protocol_pb2 as protocol
+from .base import numpy_dtype
 
 logger = logging.getLogger(__package__)
 
@@ -507,13 +508,8 @@ class EEGDBTCPClient:
 
     @staticmethod
     def _numpy_dtype(data_type: int) -> np.dtype:
-        return {
-            DT_INT16: np.int16,
-            DT_INT24: np.int32,
-            DT_FLOAT32: np.float32,
-            DT_FLOAT64: np.float64,
-            DT_INT64: np.int64,
-        }[data_type]
+        """Backward-compatible alias for the public transport dtype helper."""
+        return numpy_dtype(data_type)
 
     @staticmethod
     def _validate_read_count(sample_count: int) -> None:

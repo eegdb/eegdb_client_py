@@ -2,7 +2,13 @@
 
 __version__ = "0.1.0"
 
-__all__ = ["EEGDBEpochs", "EEGDBQueryClient", "EEGDBTrials", "SignalChunk"]
+__all__ = [
+    "EEGDBEpochs",
+    "EEGDBQueryClient",
+    "EEGDBStorageClient",
+    "EEGDBTrials",
+    "SignalChunk",
+]
 
 
 def __getattr__(name: str):
@@ -15,6 +21,10 @@ def __getattr__(name: str):
         from .query_client import EEGDBQueryClient
 
         return EEGDBQueryClient
+    if name == "EEGDBStorageClient":
+        from .transport.storage_client import EEGDBStorageClient
+
+        return EEGDBStorageClient
     if name in {"EEGDBTrials", "SignalChunk"}:
         from .analysis import EEGDBTrials, SignalChunk
 

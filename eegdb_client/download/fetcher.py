@@ -10,7 +10,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from ..codec_local import LocalCodec, parse_block_codec
-from ..transport.tcp_client import EEGDBTCPClient
+from ..transport.base import TransferClient, numpy_dtype
 from .writers.edf_writer import write_edf_from_study
 from .writers.fif_writer import write_fif_from_study
 from .writers.npz_writer import write_npz_from_study
@@ -20,7 +20,7 @@ logger = logging.getLogger(__package__)
 
 
 def download_study(
-    client: EEGDBTCPClient,
+    client: TransferClient,
     study_id: str,
     output_path: str,
     fmt: str = "edf",
@@ -110,7 +110,7 @@ def download_study(
 
 
 def _download_channel_to_disk(
-    client: EEGDBTCPClient,
+    client: TransferClient,
     study_id: str,
     channel_id: int,
     data_type: int,
@@ -124,7 +124,7 @@ def _download_channel_to_disk(
 ) -> np.ndarray:
     values = np.memmap(
         temp_path,
-        dtype=client._numpy_dtype(data_type),
+        dtype=numpy_dtype(data_type),
         mode="w+",
         shape=(total_samples,),
     )
@@ -154,7 +154,7 @@ def _download_channel_to_disk(
 
 
 def _probe_channel_length(
-    client: EEGDBTCPClient, study_id: str, channel_id: int, data_type: int
+    client: TransferClient, study_id: str, channel_id: int, data_type: int
 ) -> int:
     """Binary search upper bound when study metadata lacks sample count."""
     lo, hi = 0, 1

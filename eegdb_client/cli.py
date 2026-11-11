@@ -11,7 +11,7 @@ from .logging_config import configure_logging, install_exception_hook
 from .models import StudyAttrs
 from .readers import load_source_file, record_lsl
 from .readers.bids import attach_bids_events, discover_bids_recordings
-from .transport.tcp_client import EEGDBTCPClient
+from .transport import EEGDBStorageClient, EEGDBTCPClient, TransferClient
 from .upload.pipeline import upload_source_file
 
 logger = logging.getLogger(__package__)
@@ -29,6 +29,14 @@ def _tcp_client(args: argparse.Namespace) -> EEGDBTCPClient:
     )
 
 
+def _client(args: argparse.Namespace) -> TransferClient:
+    if args.backend == "local":
+        if not args.storage_path:
+            raise SystemExit("--storage-path is required with --backend local")
+        return EEGDBStorageClient(args.storage_path, library_path=args.storage_library or None)
+    return _tcp_client(args)
+
+
 def cmd_upload(args: argparse.Namespace) -> None:
     try:
         source = load_source_file(args.file)
@@ -43,7 +51,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
-    with _tcp_client(args) as client:
+    with _client(args) as client:
         study_id = upload_source_file(
             client,
             source,
@@ -57,7 +65,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
-    with _tcp_client(args) as client:
+    with _client(args) as client:
         studies = client.list_studies()
     for s in studies:
         print(
@@ -70,7 +78,9 @@ def cmd_download(args: argparse.Namespace) -> None:
     def progress(msg: str, frac: float) -> None:
         print(f"[{frac * 100:5.1f}%] {msg}")
 
-    with _tcp_client(args) as client:
+    if args.backend == "local" and args.local_decode:
+        raise SystemExit("--local-decode only applies to the TCP backend")
+    with _client(args) as client:
         path = download_study(
             client,
             args.study_id,
@@ -98,7 +108,7 @@ def cmd_import_dir(args: argparse.Namespace) -> None:
     for index, path in enumerate(paths, 1):
         print(f"[{index}/{len(paths)}] {path}")
         try:
-            with _tcp_client(args) as client:
+            with _client(args) as client:
                 source = load_source_file(str(path))
                 study_id = upload_source_file(
                     client,
@@ -131,7 +141,7 @@ def cmd_import_bids(args: argparse.Namespace) -> None:
         attrs.lab = args.lab
         attrs.device_type = args.device
         try:
-            with _tcp_client(args) as client:
+            with _client(args) as client:
                 source = attach_bids_events(
                     load_source_file(str(recording.path)), recording.path
                 )
@@ -154,6 +164,8 @@ def cmd_import_bids(args: argparse.Namespace) -> None:
 
 
 def cmd_export(args: argparse.Namespace) -> None:
+    if args.backend == "local" and args.local_decode:
+        raise SystemExit("--local-decode only applies to the TCP backend")
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
     failures: list[tuple[str, Exception]] = []
@@ -161,7 +173,7 @@ def cmd_export(args: argparse.Namespace) -> None:
         output = output_dir / f"{study_id}.{args.format}"
         print(f"[{index}/{len(args.study_ids)}] {study_id}")
         try:
-            with _tcp_client(args) as client:
+            with _client(args) as client:
                 saved = download_study(
                     client,
                     study_id,
@@ -187,19 +199,36 @@ def cmd_upload_lsl(args: argparse.Namespace) -> None:
         resolve_timeout=args.resolve_timeout,
     )
     attrs = StudyAttrs(lab=args.lab, paradigm=args.paradigm, device_type="LSL")
-    with _tcp_client(args) as client:
+    with _client(args) as client:
         study_id = upload_source_file(client, source, attrs, resume=False)
     print(study_id)
 
 
 def cmd_health(args: argparse.Namespace) -> None:
-    with _tcp_client(args) as client:
+    with _client(args) as client:
         studies = client.list_studies()
-    print(f"ok  host={args.host}  port={args.port}  studies={len(studies)}")
+    target = args.storage_path if args.backend == "local" else f"{args.host}:{args.port}"
+    print(f"ok  backend={args.backend}  target={target}  studies={len(studies)}")
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="eegdb-client")
+    parser.add_argument(
+        "--backend",
+        choices=["tcp", "local"],
+        default="tcp",
+        help="remote TCP server or embedded local storage (default: tcp)",
+    )
+    parser.add_argument(
+        "--storage-path",
+        default="",
+        help="local EEGDB directory for --backend local",
+    )
+    parser.add_argument(
+        "--storage-library",
+        default="",
+        help="optional path to the eegdb-storage native library",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--database", default="default", help="Database name (default: default)")
@@ -215,18 +244,20 @@ def main(argv: list[str] | None = None) -> None:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_health = sub.add_parser("health", help="TCP connection check")
+    p_health = sub.add_parser("health", help="Check the selected backend")
     p_health.set_defaults(func=cmd_health)
 
     p_upload = sub.add_parser(
-        "upload", help="Upload EDF/BDF/FIF/CDT/BrainVision/EEGLAB/XDF via TCP"
+        "upload", help="Import EDF/BDF/FIF/CDT/BrainVision/EEGLAB/XDF"
     )
     p_upload.add_argument("file")
     p_upload.add_argument("--lab", default="")
     p_upload.add_argument("--paradigm", default="")
     p_upload.add_argument("--device", default="")
     p_upload.add_argument("--batch-seconds", type=float, default=10.0)
-    p_upload.add_argument("--no-resume", action="store_true", help="disable upload checkpoint recovery")
+    p_upload.add_argument(
+        "--no-resume", action="store_true", help="disable upload checkpoint recovery"
+    )
     p_upload.add_argument("--checkpoint", default=None, help="custom upload checkpoint path")
     p_upload.set_defaults(func=cmd_upload)
 
@@ -257,10 +288,10 @@ def main(argv: list[str] | None = None) -> None:
     p_lsl.add_argument("--paradigm", default="")
     p_lsl.set_defaults(func=cmd_upload_lsl)
 
-    p_list = sub.add_parser("list", help="List studies via TCP")
+    p_list = sub.add_parser("list", help="List studies")
     p_list.set_defaults(func=cmd_list)
 
-    p_dl = sub.add_parser("download", help="Download study via TCP")
+    p_dl = sub.add_parser("download", help="Download or export a study")
     p_dl.add_argument("study_id")
     p_dl.add_argument("-o", "--output", required=True)
     p_dl.add_argument(

@@ -16,3 +16,7 @@ pylsl>=1.16
 #   cd ../eegdb-codec && make codec-wheel
 #   pip install dist/python/eegdb_codec-*.whl
 # eegdb_codec
+
+# Optional: embedded local database access (--backend local)
+# Install the wheel built by ../eegdb-storage/scripts/build_python_wheel.sh
+# eegdb-storage
